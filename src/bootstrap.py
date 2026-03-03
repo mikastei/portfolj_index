@@ -9,4 +9,4 @@ def init_ssl():
         import certifi_win32  # noqa: F401  (import side-effect patches certifi)
     except Exception:
         # Safe fallback; if not Windows or package missing
-        pass
+        pass    

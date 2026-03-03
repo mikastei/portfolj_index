@@ -1,6 +1,7 @@
 .venv/
 *.log
 __pycache__/
+dev/__pycache__/
 *.pyc
 *.xlsximport yfinance as yf
 print(yf.download("AAPL", period="5d").head())
