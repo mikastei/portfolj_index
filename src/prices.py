@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from importlib.util import find_spec
 from pathlib import Path
@@ -164,14 +165,63 @@ def fetch_prices_yahoo(
     if not prices.index.is_monotonic_increasing:
         prices = prices.sort_index()
 
-    coverage = prices.isna().mean()
-    warn_cov = coverage[coverage > 0.05]
-    for ticker, share in warn_cov.items():
-        logger.warning("Low price coverage ticker=%s nan_share=%.4f", ticker, float(share))
-    fail_cov = coverage[coverage > 0.25]
-    if not fail_cov.empty:
-        details = ", ".join([f"{t}:{float(v):.4f}" for t, v in fail_cov.items()])
-        raise ValueError(f"Too much missing price data (>25% NaN): {details}")
+    strict_coverage = os.getenv("PRICE_COVERAGE_STRICT", "1") != "0"
+    coverage_rows: list[dict[str, object]] = []
+    for ticker in clean:
+        s = prices[ticker]
+        first_valid = s.first_valid_index()
+        if first_valid is None:
+            raise ValueError(f"No price data for ticker {ticker}")
+        first_valid = pd.Timestamp(first_valid)
+        window_start = max(start_ts, first_valid)
+        window = s.loc[(s.index >= window_start) & (s.index <= requested_end)]
+        if window.empty:
+            raise ValueError(
+                f"No coverage window for ticker {ticker} "
+                f"(first_valid={first_valid.date().isoformat()}, window_start={window_start.date().isoformat()})"
+            )
+        coverage_rows.append(
+            {
+                "ticker": ticker,
+                "nan_share": float(window.isna().mean()),
+                "first_valid": first_valid,
+                "window_start": window_start,
+            }
+        )
+
+    cov_df = pd.DataFrame(coverage_rows).sort_values("nan_share", ascending=False)
+    warn_df = cov_df[cov_df["nan_share"] > 0.05]
+    if not warn_df.empty:
+        top_n = warn_df.head(10)
+        logger.warning(
+            "Low price coverage: %s ticker(s) above 5%% NaN; showing worst %s",
+            len(warn_df),
+            len(top_n),
+        )
+        for _, row in top_n.iterrows():
+            logger.warning(
+                "Coverage ticker=%s nan_share=%.4f first_valid=%s window_start=%s",
+                row["ticker"],
+                float(row["nan_share"]),
+                pd.Timestamp(row["first_valid"]).date().isoformat(),
+                pd.Timestamp(row["window_start"]).date().isoformat(),
+            )
+
+    fail_df = cov_df[cov_df["nan_share"] > 0.25]
+    if not fail_df.empty:
+        details = "; ".join(
+            [
+                (
+                    f"{row['ticker']}:nan_share={float(row['nan_share']):.4f},"
+                    f"first_valid={pd.Timestamp(row['first_valid']).date().isoformat()},"
+                    f"window_start={pd.Timestamp(row['window_start']).date().isoformat()}"
+                )
+                for _, row in fail_df.iterrows()
+            ]
+        )
+        if strict_coverage:
+            raise ValueError(f"Too much missing price data (>25% NaN): {details}")
+        logger.warning("Coverage strict mode disabled (PRICE_COVERAGE_STRICT=0). %s", details)
 
     _write_cache(cache_path, merged)
     logger.info(
