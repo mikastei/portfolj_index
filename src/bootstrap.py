@@ -1,12 +1,9 @@
-# src/bootstrap.py
-"""
-Bootstrap for Windows SSL cert handling.
-Must run BEFORE any yfinance/curl_cffi network calls.
-"""
+"""Bootstrap helpers."""
 
-def init_ssl():
+
+def init_ssl() -> None:
+    """Initialize Windows SSL certificate patching for yfinance requests."""
     try:
-        import certifi_win32  # noqa: F401  (import side-effect patches certifi)
+        import certifi_win32  # noqa: F401
     except Exception:
-        # Safe fallback; if not Windows or package missing
-        pass    
+        pass
