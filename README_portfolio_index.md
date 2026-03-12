@@ -1,4 +1,4 @@
-﻿# Portfoljindex
+# Portfoljindex
 
 Det har projektet bygger ett portfoljindex (bas 100) for en eller flera portfoljer samt benchmarkserier, baserat pa transaktioner och prisdata fran Yahoo Finance.
 

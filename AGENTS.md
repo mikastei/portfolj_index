@@ -1,4 +1,4 @@
-﻿# AGENTS.md
+# AGENTS.md
 
 ## Syfte
 
@@ -161,6 +161,29 @@ Om lokal verifiering inte kunde koras ska agentens slutrapport uttryckligen skil
 - vad som har implementerats
 - vad som har kontrollerats genom kodlasning eller annan indirekt validering
 - vad som aterstar att verifiera genom faktisk korning
+
+---
+
+# Agentmiljo och filskrivning
+
+Detta projekt har haft viss friktion med Codex-agenters filskrivning och patchning i Windows-miljo.
+
+Agenter bor darfor utga fran foljande:
+
+- workspace-write racker normalt for filer i repot, men enstaka verktyg kan anda fallera
+- om `apply_patch` misslyckas tidigt pa en liten andring ska agenten snabbt byta till ett stabilt fallback-satt i stallet for att fastna i patchfelsokning
+- hall alla textfiler i UTF-8 och konsekventa radslut for att minska patch- och diff-problem
+- undvik att lagga energi pa `.pytest_cache` eller andra mappar som visar behorighetsfel om de inte ar direkt relevanta for uppgiften
+- andra inte sokvagar eller OneDrive-relaterad runtime-konfiguration utan tydligt behov
+- om en miljobegransning misstanks ska agenten skilja pa verktygsfel, filbehorighet och faktisk projektbugg
+
+Standardarbetssatt i arbetstradar:
+
+1. lasa relevanta filer och kontrollera snabbt att skrivning i repot fungerar
+2. gora sma, fokuserade andringar i fa filer at gangen
+3. om patchverktyg strular, anvanda ett enklare och mer robust skrivsatt
+4. behalla textfiler som UTF-8 med konsekventa radslut
+5. redovisa tydligt vad som ar implementerat, indirekt verifierat och kvar att testa
 
 ---
 

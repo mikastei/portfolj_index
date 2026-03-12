@@ -1,4 +1,4 @@
-﻿"""Metric calculations for dashboard-ready portfolio tables."""
+"""Metric calculations for dashboard-ready portfolio tables."""
 
 from __future__ import annotations
 

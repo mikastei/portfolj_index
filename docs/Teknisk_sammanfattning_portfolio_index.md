@@ -1,4 +1,4 @@
-﻿# Teknisk sammanfattning for Portfolio_index och Dashboard_prep
+# Teknisk sammanfattning for Portfolio_index och Dashboard_prep
 
 ## 1. Relevanta filer/mappar
 

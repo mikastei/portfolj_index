@@ -1,4 +1,4 @@
-﻿"""Separate step that prepares dashboard-ready tables from Portfolio_index output."""
+"""Separate step that prepares dashboard-ready tables from Portfolio_index output."""
 
 from __future__ import annotations
 

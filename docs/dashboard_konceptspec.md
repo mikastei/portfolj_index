@@ -1,4 +1,4 @@
-﻿# Dashboard - konceptdesign
+# Dashboard - konceptdesign
 
 ## Syfte
 
@@ -11,6 +11,9 @@ Dashboarden ska ge en snabb och tydlig bild av:
 - hur portfoljerna har presterat inom olika kategorier
 
 Den ska fungera som huvudvy for portfoljanalys och som konsumtionslager ovanpa `portfolio_dashboard_data.xlsx`.
+
+Dashboarden ska pa sikt materialiseras som en separat Excel-workbook ovanpa detta underlag.
+Output-path for den workbooken bor vara konfigurerbar i `src/config.py`, inte hardkodad i sjalva dashboardbyggandet.
 
 ## Projektets nulage i korthet
 
@@ -49,6 +52,11 @@ Nuvarande dashboarddata innehaller:
 - Korrelationstabellen innehaller endast unika seriepar.
 - Kategoriunika serier byggs bara for `REAL`.
 - Kategoriunika serier foljer med som analysserier till dashboardunderlaget.
+- Benchmark ar inte hardkopplade till en enskild portfolj i dashboarden.
+- Jamforelser i dashboarden ska kunna goras fritt mellan:
+  - portfoljer
+  - portfoljvarianter
+  - benchmark
 
 ## Overgripande struktur
 
@@ -61,7 +69,14 @@ Dashboarden bor konceptuellt besta av sex delar:
 5. Struktur
 6. Kategorianalys
 
-Den viktigaste justeringen mot tidigare koncept ar att kategoriunika `REAL`-serier nu bor fa en egen plats i dashboarden i stallet for att bara blandas in overallt.
+I v1 bor detta konkretiseras till fyra arbetsflikar:
+
+1. `Overview`
+2. `Performance`
+3. `Structure`
+4. `Category`
+
+Den viktigaste justeringen mot tidigare koncept ar att kategoriunika `REAL`-serier ska ha en egen plats i dashboarden i stallet for att blandas in i huvudlagret.
 
 ## 1. Portfoljoversikt
 
@@ -71,8 +86,8 @@ Syfte:
 
 Visar centrala nyckeltal for:
 
-- portfoljer
-- benchmark
+- vald primarserie
+- valfria jamforelseserier
 
 Exempel pa nyckeltal:
 
@@ -85,7 +100,8 @@ Exempel pa nyckeltal:
 
 Rekommendation:
 
-- denna vy bor som standard fokusera pa huvudserier, inte kategori-REAL-serier
+- denna vy ska som standard fokusera pa huvudserier, inte kategori-REAL-serier
+- benchmark och andra portfoljer ska kunna laggas till som fria jamforelser
 
 ## 2. Utveckling
 
@@ -96,18 +112,20 @@ Syfte:
 Visuellt fokus:
 
 - indexutveckling
-- jamforelse mot benchmark
+- jamforelse mot valfria benchmark eller andra portfoljer
 - eventuell jamforelse mellan `REAL`, `CUR`, `TGT`
 
 Typiska grafer:
 
 - tillvaxtgraf
-- relativ utveckling mot vald benchmark
+- relativ utveckling mot vald jamforelseserie
+- drawdown-graf
 
 Rekommendation:
 
-- kategori-REAL-serier bor inte vara med har som standard
-- de kan vara valbara, men inte default
+- kategori-REAL-serier ska inte vara med har som standard
+- de kan vara valbara senare, men inte i huvudlogiken for v1
+- anvandaren bor kunna valja flera jamforelseserier fritt inom huvuduniversumet
 
 ## 3. Risk
 
@@ -119,39 +137,41 @@ Typiska analyser:
 
 - drawdown over tid
 - risk/return-diagram
+- periodbaserade riskmatt
 
 Visualiseringar:
 
 - drawdown-graf
-- risk/return scatter
+- senare eventuellt risk/return scatter
 
 Rekommendation:
 
-- fokus bor vara pa huvudserier och benchmark i standardlaget
+- fokus ska vara pa huvudserier och benchmark i standardlaget
+- en enklare riskdel kan inga i `Performance` i v1
+- mer avancerad riskvy kan komma i v2
 
 ## 4. Jamforelse
 
 Syfte:
 
 - visa hur portfoljer och benchmark samvarierar
+- mojliggora fri visuell och tabellar jamforelse
 
 Analys:
 
-- korrelation mellan serier
-- korrelation mot benchmark
-- diversifiering och riskkluster
+- jamforelse mellan valfria portfoljer, varianter och benchmark
+- senare korrelation, diversifiering och riskkluster
 
 Visualisering:
 
-- korrelationsheatmap
+- i v1 framst via KPI-tabeller, periodreturer och gemensamma diagram
+- korrelationsheatmap kan vanta till v2
 
 Rekommendation:
 
-- denna del behover sannolikt ett filter for seriegrupp, till exempel:
-  - huvudserier
-  - kategori-REAL-serier
-  - benchmark
-  - alla
+- denna del ska inte forutsatta en fast benchmarkkoppling per portfolj
+- jamforelse ska bygga pa ett primarval plus valfria tillaggsserier
+- antal samtidiga jamforelseserier bor begransas i v1 for enkelhetens skull
 
 ## 5. Struktur
 
@@ -172,7 +192,7 @@ Visualiseringar:
 
 Rekommendation:
 
-- denna del bor baseras pa `Allocation_Snapshot`
+- denna del ska baseras pa `Allocation_Snapshot`
 - hall isar faktisk struktur och historiska kategoriserier
 
 ## 6. Kategorianalys
@@ -190,7 +210,9 @@ Innehall:
 
 Rekommendation:
 
-- detta bor vara en egen sektion eller flik
+- detta ska vara en egen flik eller sektion
+- kategori-REAL ska inte vara default i huvudoversikten
+- denna del ska fungera som ett tydligt drilldown-lage
 
 ## Analysuniversum i dashboarden
 
@@ -229,31 +251,109 @@ Dashboarden ska vara:
   - uppdateras nar Python-korningarna uppdaterar data
 - Filtrerbar
   - kunna skilja mellan huvudserier och kategori-REAL-serier
+- Jamforbar
+  - lata anvandaren valja fri jamforelse mellan portfoljer, portfoljvarianter och benchmark
+- Utbyggbar
+  - ge en tydlig grund for framtida v2-forbattringar utan att v1 maste goras om
+
+## Foreslagen anvandarlogik
+
+Dashboarden bor utga fran ett tydligt primarval och ett fritt jamforelselager.
+
+### Primarval
+
+Anvandaren valjer:
+
+- primar portfolj
+- primar variant
+- period
+
+Primarserien ska i v1 avse huvudserier, inte kategori-REAL.
+
+### Jamforelselager
+
+Anvandaren ska kunna lagga till upp till nagra valfria jamforelseserier, till exempel:
+
+- benchmark
+- andra portfoljer
+- andra portfoljvarianter
+
+I v1 bor detta begransas till ett litet antal fasta val, till exempel:
+
+- `Jamforelse 1`
+- `Jamforelse 2`
+- `Jamforelse 3`
+
+Detta ger en enklare och mer generell logik an att forsoka koppla ett standardbenchmark till varje portfolj.
+
+### Seriegruppslogik
+
+- huvudserier som standard i `Overview` och `Performance`
+- kategori-REAL i separat `Category`-flik
+- benchmark som fritt valbar jamforelseserie
+
+## Rekommenderad v1-struktur
+
+V1 bor innehalla foljande flikar:
+
+1. `Overview`
+   - KPI-kort for primarserien
+   - enkel jamforelsetabell mot valda serier
+   - snabb statusbild
+
+2. `Performance`
+   - indexgraf for primarserie och jamforelseserier
+   - drawdown-graf
+   - periodreturer
+
+3. `Structure`
+   - portfoljens nuvarande struktur utifran `Allocation_Snapshot`
+
+4. `Category`
+   - kategori-KPI
+   - kategoriutveckling
+   - enkel drilldown per portfolj
+
+## Standardval for v1
+
+Rekommenderade standardval:
+
+- default-variant: `REAL`
+- default-period i dashboardvyn: `1Y`
+- `Since_Start` ska fortsatt vara valbart
+- jamforelseserier ar tomma som standard eller satta till ett mycket enkelt startlage
+- huvudserier ar standarduniversum
+- kategori-REAL visas separat
+
+## Excel-arkitektur
+
+For v1 bor dashboarden byggas med fokus pa enkelhet och robusthet.
+
+Rekommenderad arkitektur:
+
+- separat dashboard-workbook
+- configstyrd output-path
+- formler och hjalptabeller som primar teknik
+- diagram kopplade till kontrollerade hjalpomraden
+- pivottabeller endast om de ger tydlig nytta
+
+Det bor vara enkelt att felsoka workbooken och enkelt att lagga till nya vyer i v2.
 
 ## Oppna fragor for fortsatt planering
 
-- Vilka vyer ska finnas i forsta versionen av dashboarden, och vilka kan vanta?
-- Ska alla analysserier visas direkt, eller behovs tydliga standardfilter?
-- Hur ska standardurval fungera:
-  - default-portfolj
-  - default-variant
-  - default-period
-  - default-benchmark
-- Hur ska benchmark valjas i jamforelsevyer:
-  - manuellt i Excel
-  - via dashboardlogik
-- Hur ska kategori-REAL-serier visas:
-  - som fullvardiga serier overallt
-  - eller i en egen kategorisektion med egna filter
-- Vilken Excel-arkitektur ar bast:
-  - pivottabeller
-  - formler mot databladen
-  - hjalptabeller i workbooken
+- Vilken default-portfolj ska visas nar workbooken oppnas?
+- Ska perioddefault i sjalva dashboarden vara `1Y` eller `Since_Start`?
+- Hur manga jamforelseserier ska visas samtidigt i v1?
+- Ska jamforelseserier valjas via fasta kontrollceller eller via nagon enklare tabellstyrning i Excel?
+- Hur mycket kategori-analys ska inga i v1:
+  - bara tabell
+  - eller aven graf och KPI
+- Ska korrelationsvyn inga i v1 eller skjutas till v2?
 
 ## Nasta prioriterade steg
 
-1. definiera vilka dashboardvyer som ska visa huvudserier som default
-2. definiera hur kategori-REAL-serier ska filtreras eller visas separat
-3. definiera anvandarval och filter
-4. synka Excel-designen mot de faktiska tabellerna i `portfolio_dashboard_data.xlsx`
-5. bryta ner implementationen i tydliga arbetstradar
+1. lasa v1-scope och flikstruktur
+2. lasa kontrollfalten for primarserie, variant, period och jamforelser
+3. definiera output-path och workbookansvar i `src/config.py`
+4. ta fram en konkret wireframe for varje v1-flik
+5. bryta ner implementationen i separata arbetstradar

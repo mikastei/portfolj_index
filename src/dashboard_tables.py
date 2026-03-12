@@ -1,4 +1,4 @@
-﻿"""Builders for dashboard output tables."""
+"""Builders for dashboard output tables."""
 
 from __future__ import annotations
 
