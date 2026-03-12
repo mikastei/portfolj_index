@@ -27,6 +27,7 @@ def run() -> None:
         build_portfolio_series_map,
         build_portfolios_and_benchmarks,
         build_series_definition,
+        discover_fx_tickers,
         required_tickers,
     )
     from .prices import download_adj_close
@@ -40,21 +41,31 @@ def run() -> None:
         tables["mapping"],
         tables["benchmarks"],
         tables["fondertabell"],
+        base_currency=config.BASE_CURRENCY,
     )
+    fx_tickers = discover_fx_tickers(
+        tables["mapping"],
+        tables["benchmarks"],
+        base_currency=config.BASE_CURRENCY,
+    )
+    download_tickers = sorted(set(tickers["all"]) | set(fx_tickers))
     logging.info(
         "Discovered %s total tickers (%s real, %s model, %s benchmarks)",
-        len(tickers["all"]),
+        len(download_tickers),
         len(tickers["real"]),
         len(tickers["model"]),
         len(tickers["benchmarks"]),
     )
+    if fx_tickers:
+        logging.info("FX tickers added for conversion: %s", fx_tickers)
 
     start_date = pd.to_datetime(tables["portfolio_metadata"]["Index_Start_Date"], errors="coerce").min()
     prices = download_adj_close(
-        tickers=tickers["all"],
+        tickers=download_tickers,
         start_date=start_date,
         end_date=None,
         forward_fill=config.FORWARD_FILL,
+        fx_tickers=fx_tickers,
     )
 
     inputs = EngineInputs(
@@ -64,6 +75,7 @@ def run() -> None:
         benchmarks=tables["benchmarks"],
         fondertabell=tables["fondertabell"],
         prices=prices,
+        base_currency=config.BASE_CURRENCY,
     )
 
     series_map = build_portfolios_and_benchmarks(inputs)
@@ -71,6 +83,7 @@ def run() -> None:
         tables["portfolio_metadata"],
         tables["benchmarks"],
         tables["mapping"],
+        tables["transactions"],
         tickers["real"],
         tickers["model"],
     )

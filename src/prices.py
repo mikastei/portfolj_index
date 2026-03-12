@@ -88,6 +88,7 @@ def fetch_prices_yahoo(
     cache_path: Path = CACHE_PATH,
 ) -> pd.DataFrame:
     """Fetch close prices with batch download, retry, cache and coverage checks."""
+    requested_count = len(tickers)
     clean = sorted({str(t).strip() for t in tickers if str(t).strip()})
     if not clean:
         return pd.DataFrame()
@@ -226,7 +227,7 @@ def fetch_prices_yahoo(
     _write_cache(cache_path, merged)
     logger.info(
         "Price fetch tickers=%s start=%s end=%s rows=%s cache=%s incremental=%s",
-        len(clean),
+        requested_count,
         start_ts.date().isoformat(),
         requested_end.date().isoformat(),
         len(prices),
@@ -241,8 +242,14 @@ def download_adj_close(
     start_date: pd.Timestamp | str,
     end_date: pd.Timestamp | str | None = None,
     forward_fill: bool = True,
+    fx_tickers: list[str] | None = None,
 ) -> pd.DataFrame:
     """Download daily adjusted close-equivalent prices from Yahoo Finance."""
+    logger.info(
+        "download_adj_close received %d asset tickers and %d FX tickers",
+        len(tickers),
+        len(fx_tickers or []),
+    )
     prices = fetch_prices_yahoo(
         tickers=tickers,
         start_date=start_date,
@@ -254,6 +261,9 @@ def download_adj_close(
     missing = [t for t in clean if t not in prices.columns or prices[t].dropna().empty]
     if missing:
         raise ValueError(f"Missing Yahoo data for ticker(s): {missing}")
+    for fx in sorted(set(fx_tickers or [])):
+        if fx not in prices.columns:
+            raise ValueError(f"FX ticker requested but missing from downloaded prices: {fx}")
 
     return prices
 
