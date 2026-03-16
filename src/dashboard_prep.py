@@ -26,6 +26,45 @@ from .dashboard_tables import (
 )
 
 
+def _log_allocation_snapshot_variant_gaps(
+    series_definition: pd.DataFrame,
+    allocation_snapshot: pd.DataFrame,
+) -> None:
+    """Warn when a main portfolio variant exists as a series but lacks allocation rows."""
+    series_def = series_definition.copy()
+    series_def["Series_Type"] = series_def["Series_Type"].fillna("").astype(str).str.strip().str.upper()
+    series_def["Portfolio_Name"] = series_def["Portfolio_Name"].fillna("").astype(str).str.strip()
+    series_def["Variant"] = series_def["Variant"].fillna("").astype(str).str.strip().str.upper()
+    category_series = series_def["Category"].fillna("").astype(str).str.strip()
+
+    expected_main = (
+        series_def.loc[
+            (series_def["Series_Type"] == "PORT")
+            & (series_def["Portfolio_Name"] != "")
+            & (category_series == "")
+            & (series_def["Variant"] != ""),
+            ["Portfolio_Name", "Variant", "Series_ID"],
+        ]
+        .drop_duplicates()
+        .reset_index(drop=True)
+    )
+    if expected_main.empty:
+        return
+
+    actual_series_ids = set(
+        allocation_snapshot["Series_ID"].dropna().astype(str).str.strip().tolist()
+    )
+    missing_rows = expected_main.loc[~expected_main["Series_ID"].isin(actual_series_ids)]
+    for row in missing_rows.itertuples(index=False):
+        logging.warning(
+            "Allocation snapshot missing for portfolio=%s variant=%s series_id=%s; "
+            "Structure will need workbook fallback if this variant is selected.",
+            row.Portfolio_Name,
+            row.Variant,
+            row.Series_ID,
+        )
+
+
 def _configure_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -52,11 +91,11 @@ def run(
     source_output_path: str | Path | None = None,
     dashboard_output_path: str | Path | None = None,
 ) -> None:
-    """Read Portfolio_index output and write dashboard-ready workbook."""
+    """Read Portfolio_index output and write dashboard data workbook."""
     _configure_logging()
 
-    source_path = Path(source_output_path or config.DASHBOARD_SOURCE_OUTPUT_PATH)
-    output_path = Path(dashboard_output_path or config.DASHBOARD_OUTPUT_PATH)
+    source_path = Path(source_output_path or config.DASHBOARD_DATA_SOURCE_PATH)
+    output_path = Path(dashboard_output_path or config.DASHBOARD_DATA_OUTPUT_PATH)
 
     logging.info("Loading dashboard source workbook: %s", source_path)
     source = load_dashboard_source(source_path)
@@ -92,6 +131,7 @@ def run(
         source.portfolio_series_map,
         source.series_definition,
     )
+    _log_allocation_snapshot_variant_gaps(source.series_definition, allocation_snapshot)
     dashboard_config = build_dashboard_config()
     build_info = build_build_info(
         source_output_file=str(source.source_path),
@@ -112,7 +152,7 @@ def run(
         dashboard_config.to_excel(writer, sheet_name="Dashboard_Config", index=False)
         build_info.to_excel(writer, sheet_name="Build_Info", index=False)
 
-    logging.info("Dashboard workbook written: %s", output_path)
+    logging.info("Dashboard data workbook written: %s", output_path)
 
 
 if __name__ == "__main__":

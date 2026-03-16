@@ -172,10 +172,13 @@ Agenter bor darfor utga fran foljande:
 
 - workspace-write racker normalt for filer i repot, men enstaka verktyg kan anda fallera
 - om `apply_patch` misslyckas tidigt pa en liten andring ska agenten snabbt byta till ett stabilt fallback-satt i stallet for att fastna i patchfelsokning
+- nya filer bor i detta repo normalt skapas med ett enkelt shell-baserat skrivsatt direkt, eftersom `apply_patch` har visat sig vara opalitligt just for filskapande i denna Windows-miljo
 - hall alla textfiler i UTF-8 och konsekventa radslut for att minska patch- och diff-problem
 - undvik att lagga energi pa `.pytest_cache` eller andra mappar som visar behorighetsfel om de inte ar direkt relevanta for uppgiften
 - andra inte sokvagar eller OneDrive-relaterad runtime-konfiguration utan tydligt behov
 - om en miljobegransning misstanks ska agenten skilja pa verktygsfel, filbehorighet och faktisk projektbugg
+- den inbyggda delade terminalen kan ha striktare PowerShell- eller Python-policy an en vanlig extern terminal; blockerad `Activate.ps1`, `python` eller `py` i den delade terminalen ska inte automatiskt tolkas som projektfel
+- om exekverbar verifiering blockeras i den delade terminalen ska agenten redovisa det som en miljobegransning och ge exakta kommandon for lokal korning i extern terminal
 
 Standardarbetssatt i arbetstradar:
 

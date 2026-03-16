@@ -160,6 +160,24 @@ def _portfolio_name_col(df: pd.DataFrame) -> str | None:
     return None
 
 
+def _display_name_map_from_mapping(mapping: pd.DataFrame) -> dict[str, str]:
+    if "Yahoo_Ticker" not in mapping.columns:
+        return {}
+
+    map_df = mapping.copy()
+    map_df["Yahoo_Ticker"] = map_df["Yahoo_Ticker"].fillna("").astype(str).str.strip()
+    map_df = map_df[map_df["Yahoo_Ticker"] != ""]
+    if map_df.empty:
+        return {}
+
+    if "Name" in map_df.columns:
+        map_df["Display_Name"] = map_df["Name"].fillna("").astype(str).str.strip()
+    else:
+        map_df["Display_Name"] = ""
+    map_df["Display_Name"] = map_df["Display_Name"].where(map_df["Display_Name"] != "", map_df["Yahoo_Ticker"])
+    return map_df.groupby("Yahoo_Ticker", as_index=True)["Display_Name"].first().to_dict()
+
+
 def _portfolio_rows(portfolio_metadata: pd.DataFrame) -> list[pd.Series]:
     if portfolio_metadata.empty:
         raise ValueError("Portfolio_Metadata is empty")
@@ -1034,22 +1052,122 @@ def build_portfolios_and_benchmarks(inputs: EngineInputs) -> dict[str, pd.DataFr
     return out
 
 
+def _latest_real_weights(
+    transactions: pd.DataFrame,
+    mapping: pd.DataFrame,
+    prices: pd.DataFrame,
+    base_currency: str = "SEK",
+    portfolio_name: str | None = None,
+) -> pd.Series:
+    _tx, _effective_shares, contributions, _price_base_df, isin_to_ticker, _px_local = _real_position_state(
+        transactions,
+        mapping,
+        prices,
+        base_currency=base_currency,
+        portfolio_name=portfolio_name,
+    )
+    if contributions.empty or contributions.shape[1] == 0:
+        raise ValueError(f"Portfolio has no real holdings snapshot (portfolio={portfolio_name})")
+
+    total_value = contributions.sum(axis=1).fillna(0.0)
+    positive_dates = total_value[total_value > 0]
+    if positive_dates.empty:
+        raise ValueError(f"Portfolio has no positive real holdings value (portfolio={portfolio_name})")
+
+    snapshot_date = positive_dates.index.max()
+    snapshot = contributions.loc[snapshot_date]
+    snapshot = snapshot[snapshot > 0].dropna()
+    if snapshot.empty:
+        raise ValueError(
+            f"Portfolio has no positive real holdings contributions on snapshot date "
+            f"(portfolio={portfolio_name}, date={pd.Timestamp(snapshot_date).date().isoformat()})"
+        )
+
+    by_ticker: dict[str, float] = {}
+    for isin, value in snapshot.items():
+        ticker = str(isin_to_ticker.loc[isin]).strip() if isin in isin_to_ticker.index else ""
+        if not ticker:
+            continue
+        by_ticker[ticker] = by_ticker.get(ticker, 0.0) + float(value)
+
+    weights = pd.Series(by_ticker, dtype=float)
+    weights = weights[weights > 0]
+    if weights.empty:
+        raise ValueError(f"Portfolio real holdings snapshot did not resolve to tickers (portfolio={portfolio_name})")
+    return weights / weights.sum()
+
+
 def build_portfolio_series_map(
     portfolio_metadata: pd.DataFrame,
+    transactions: pd.DataFrame,
+    mapping: pd.DataFrame,
     fondertabell: pd.DataFrame,
+    prices: pd.DataFrame,
+    base_currency: str = "SEK",
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
+    display_name_map = _display_name_map_from_mapping(mapping)
     meta_rows = _portfolio_rows(portfolio_metadata)
+    tx_all = transactions.copy()
+    if "Portfolio_ID" not in tx_all.columns and "Dep\u00e5" in tx_all.columns:
+        tx_all["Portfolio_ID"] = tx_all["Dep\u00e5"]
     fonder_port_col = _portfolio_name_col(fondertabell)
+    meta_port_col = "Portfolio_ID" if "Portfolio_ID" in portfolio_metadata.columns else "Portfolio_Name"
+    tx_port_col = "Portfolio_ID" if "Portfolio_ID" in tx_all.columns and meta_port_col == "Portfolio_ID" else _portfolio_name_col(tx_all)
     if len(meta_rows) > 1 and fonder_port_col is None:
         raise ValueError("Fondertabell must include a portfolio column when multiple portfolios exist")
+    if len(meta_rows) > 1 and tx_port_col is None:
+        raise ValueError("Transactions must include a portfolio column when multiple portfolios exist")
 
     for meta in meta_rows:
         portfolio_name = str(meta["Portfolio_Name"])
+        portfolio_key = str(meta[meta_port_col]).strip() if meta_port_col in meta.index else portfolio_name
+        start_date = pd.to_datetime(meta["Index_Start_Date"])
+
+        if tx_port_col is None:
+            tx_p = tx_all
+        else:
+            tx_p = tx_all[tx_all[tx_port_col].astype(str).str.strip() == portfolio_key]
+
         if fonder_port_col is None:
             fonder_p = fondertabell
         else:
             fonder_p = fondertabell[fondertabell[fonder_port_col].astype(str).str.strip() == portfolio_name]
+
+        real_tickers = []
+        if not tx_p.empty and "ISIN" in tx_p.columns:
+            map_df = mapping.copy()
+            map_df["ISIN"] = map_df["ISIN"].astype(str).str.strip()
+            map_df["Yahoo_Ticker"] = map_df["Yahoo_Ticker"].astype(str).str.strip()
+            isin_to_ticker = map_df.set_index("ISIN")["Yahoo_Ticker"].to_dict()
+            tx_isins = tx_p["ISIN"].dropna().astype(str).str.strip()
+            real_tickers = sorted({isin_to_ticker.get(isin, "") for isin in tx_isins if isin_to_ticker.get(isin, "")})
+        real_fx_tickers = _fx_tickers_for_assets(real_tickers, mapping, base_currency)
+        prices_real = _portfolio_price_frame(prices, real_tickers, start_date, extra_tickers=real_fx_tickers)
+        if prices_real.empty:
+            prices_real = prices[prices.index >= start_date].copy()
+
+        try:
+            real_w = _latest_real_weights(
+                tx_p,
+                mapping,
+                prices_real,
+                base_currency=base_currency,
+                portfolio_name=portfolio_name,
+            )
+            for ticker, weight in real_w.items():
+                rows.append(
+                    {
+                        "Portfolio_Name": portfolio_name,
+                        "Series_ID": f"PORT_{slug(portfolio_name)}_REAL",
+                        "Display_Name": display_name_map.get(ticker, ticker),
+                        "Yahoo_Ticker": ticker,
+                        "Weight": float(weight),
+                        "Weight_Source": "REAL",
+                    }
+                )
+        except ValueError as exc:
+            logger.warning("Skipping REAL snapshot for portfolio=%s: %s", portfolio_name, exc)
 
         cur_w = _weights_from_fonder(fonder_p, "Andel", portfolio_name=portfolio_name)
         tgt_w = _weights_from_fonder(fonder_p, "AndelP", portfolio_name=portfolio_name)
@@ -1059,6 +1177,7 @@ def build_portfolio_series_map(
                 {
                     "Portfolio_Name": portfolio_name,
                     "Series_ID": f"PORT_{slug(portfolio_name)}_CUR",
+                    "Display_Name": display_name_map.get(ticker, ticker),
                     "Yahoo_Ticker": ticker,
                     "Weight": float(weight),
                     "Weight_Source": "Andel",
@@ -1069,6 +1188,7 @@ def build_portfolio_series_map(
                 {
                     "Portfolio_Name": portfolio_name,
                     "Series_ID": f"PORT_{slug(portfolio_name)}_TGT",
+                    "Display_Name": display_name_map.get(ticker, ticker),
                     "Yahoo_Ticker": ticker,
                     "Weight": float(weight),
                     "Weight_Source": "AndelP",

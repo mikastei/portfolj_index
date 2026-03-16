@@ -89,13 +89,17 @@ def run() -> None:
     )
     portfolio_series_map = build_portfolio_series_map(
         tables["portfolio_metadata"],
+        tables["transactions"],
+        tables["mapping"],
         tables["fondertabell"],
+        prices,
+        base_currency=config.BASE_CURRENCY,
     )
     master_long = build_master_timeseries_long(series_map)
     run_config = build_run_config(
         path_transaktioner=config.PATH_TRANSAKTIONER,
         path_fonder=config.PATH_FONDER,
-        output_path=config.OUTPUT_PATH,
+        output_path=config.PORTFOLIO_OUTPUT_PATH,
         rf_rate_annual=config.RF_RATE_ANNUAL,
         base_currency=config.BASE_CURRENCY,
         trading_days_per_year=config.TRADING_DAYS_PER_YEAR,
@@ -103,7 +107,7 @@ def run() -> None:
     )
 
     write_output_excel(
-        output_path=config.OUTPUT_PATH,
+        output_path=config.PORTFOLIO_OUTPUT_PATH,
         series_definition=series_definition,
         portfolio_series_map=portfolio_series_map,
         master_long=master_long,
@@ -118,7 +122,7 @@ def run() -> None:
     print(f"Number of portfolios: {port_count}")
     print(f"Number of benchmarks: {bm_count}")
     print(f"Date range: {min_date} -> {max_date}")
-    print(f"Output path: {config.OUTPUT_PATH}")
+    print(f"Output path: {config.PORTFOLIO_OUTPUT_PATH}")
 
 
 if __name__ == "__main__":

@@ -2,36 +2,30 @@
 
 Det har projektet bygger ett portfoljindex (bas 100) for en eller flera portfoljer samt benchmarkserier, baserat pa transaktioner och prisdata fran Yahoo Finance.
 
-Projektet innehaller nu tva separata steg:
+Projektet har nu ett gemensamt upstream-spar och tva separata downstream-spar:
 
-1. `Portfolio_index` bygger kallsanningen `portfolio_output_timeseries.xlsx`
-2. `Dashboard_prep` laser den outputen och bygger `portfolio_dashboard_data.xlsx` for Excel-dashboarden
+1. gemensamt spar som bygger `data/portfolio_output_timeseries.xlsx`
+2. dashboard/Excel-spar som bygger dashboardunderlag och workbook
+3. BI-spar som senare ska bygga en separat BI-artefakt for Power BI
 
-## Oversikt - dataflode
+## Gemensamt spar
 
-```text
-transaktioner.xlsx + fonder.xlsx
-            |
-            v
-      py -m src.main
-            |
-            v
-portfolio_output_timeseries.xlsx
-            |
-            v
-  py -m src.dashboard_prep
-            |
-            v
-portfolio_dashboard_data.xlsx
+### Syfte
+
+Det gemensamma sparet bygger den delade kallsanningen for downstream-konsumenter.
+
+Kor:
+
+```bash
+py -m src.main
 ```
 
-`Portföljindex.bat` kor bada stegen i denna ordning och loggar till `logs/`.
+Input:
 
-## Indata
+- `transaktioner.xlsx`
+- `fonder.xlsx`
 
-### `transaktioner.xlsx`
-
-Excelarbetsbok med:
+Viktiga inputtabeller i `transaktioner.xlsx`:
 
 - `Transactions`
 - `Mapping`
@@ -45,30 +39,9 @@ Viktiga regler:
 - varje ISIN i `Transactions` maste finnas i `Mapping`
 - varje ISIN i `Transactions` maste ha en giltig `Category` i `Mapping`
 
-### `fonder.xlsx`
+Output:
 
-Genereras i projektet Fondanalys och anvands som input for modellportfoljer:
-
-- `CUR`
-- `TGT`
-
-## Steg 1 - Portfolio_index
-
-Kor:
-
-```bash
-py -m src.main
-```
-
-Detta steg:
-
-1. laser inputtabeller fran Excel
-2. hamtar prisdata fran Yahoo Finance
-3. bygger vanliga `PORT_*`, `BM_*` och interna `AST_*` serier
-4. bygger kategoriunika `REAL`-serier for portfoljernas faktiska innehav
-5. skriver `data/portfolio_output_timeseries.xlsx`
-
-### Output: `portfolio_output_timeseries.xlsx`
+- `data/portfolio_output_timeseries.xlsx`
 
 Workbooken innehaller:
 
@@ -77,7 +50,15 @@ Workbooken innehaller:
 - `Master_TimeSeries_Long`
 - `Run_Config`
 
-`Master_TimeSeries_Long` ar huvudtabellen for dashboardrelevanta tidsserier:
+Nuvarande gemensamt materialiserad metadata omfattar bland annat:
+
+- portfolj: `Portfolio_Name`, `Index_Start_Date`, `Initial_Index_Value`
+- serie: `Series_ID`, `Series_Type`, `Variant`, `Benchmark_ID`
+- instrument/serie: `Yahoo_Ticker`, `Instrument_Type`, `Category`
+- korning: `Timestamp`, paths, `BASE_CURRENCY`, `RF_RATE_ANNUAL`, `TRADING_DAYS_PER_YEAR`
+- struktur-snapshot: `Portfolio_Series_Map` med aktuella vikter per `Series_ID` och ticker
+
+`Master_TimeSeries_Long` ar huvudtabellen for downstream-tidsserier:
 
 - `Date`
 - `Series_ID`
@@ -93,44 +74,52 @@ Serietyper:
 - `BM` = benchmarkserie
 - `AST` = underliggande tillgangsserie som anvands internt i motorn
 
-### Kategoriunika REAL-serier
+Kategoriunika REAL-serier byggs per portfolj och kategori och skrivs till `Series_Definition` samt `Master_TimeSeries_Long`.
 
-Projektet bygger nu aven kategoriunika REAL-serier for varje portfolj, baserat pa `Category` i `Mapping`.
+## Dashboard/Excel-spar
 
-Exempel pa `Series_ID`:
+### Syfte
 
-- `PORT_EGEN_REAL_CAT_GLOBAL_BREDA_FONDER`
-- `PORT_EGEN_REAL_CAT_R_NTOR_L_GRISK`
+Excel-sparet lever vidare oforandrat och ska fortsatt vara separat fran framtida BI-konsumtion.
 
-Egenskaper:
-
-- de byggs endast for `REAL`
-- de bygger pa verkliga innehav och verkliga dagliga vikter
-- de finns i bade `Series_Definition` och `Master_TimeSeries_Long`
-- `Series_Type` ar fortsatt `PORT`
-- `Variant` ar fortsatt `REAL`
-- kategorin uttrycks via `Series_ID` och `Category`
-- under perioder utan innehav i kategorin ar serien platt med `RET = 0`
-
-## Steg 2 - Dashboard_prep
-
-Kor:
+Kor dataunderlaget:
 
 ```bash
 py -m src.dashboard_prep
 ```
 
-Detta steg:
+Nuvarande Excel/dashboard-filer:
 
-1. laser `portfolio_output_timeseries.xlsx`
-2. bygger ett analysuniversum fran `PORT_*` och `BM_*`
-3. exkluderar `AST_*` fran dashboardanalysen
-4. inkluderar bade huvudportfoljserier och kategoriunika `REAL`-serier
-5. skriver `data/portfolio_dashboard_data.xlsx`
+- `src/dashboard_prep.py`
+- `src/dashboard_workbook.py`
+- `data/portfolio_dashboard_data.xlsx`
+- `data/portfolio_dashboard.xlsx`
 
-### Output: `portfolio_dashboard_data.xlsx`
+Dataflode:
 
-Workbooken innehaller:
+```text
+transaktioner.xlsx + fonder.xlsx
+            |
+            v
+      py -m src.main
+            |
+            v
+portfolio_output_timeseries.xlsx
+            |
+            v
+  py -m src.dashboard_prep
+            |
+            v
+portfolio_dashboard_data.xlsx
+            |
+            v
+ py -m src.dashboard_workbook
+            |
+            v
+   portfolio_dashboard.xlsx
+```
+
+`portfolio_dashboard_data.xlsx` innehaller:
 
 - `KPI_Summary`
 - `Period_Returns`
@@ -141,34 +130,75 @@ Workbooken innehaller:
 - `Dashboard_Config`
 - `Build_Info`
 
-Perioder i dashboardsteget:
+Excel-sparet ansvarar for dashboardspecifik KPI-logik, tabellberedning och workbookpresentation. Det ska inte blandas ihop med framtida BI-artefakter.
 
-- `Since_Start`
-- `YTD`
-- `30D`
-- `1Y`
+## BI-spar
 
-Notera:
+### Syfte
 
-- `Correlation_Long` innehaller endast unika seriepar
-- portfoljernas `Display_Name` skrivs som `Real`, `Current`, `Target`
-- kategoriunika REAL-serier far egna displaynamn baserade pa portfolj + kategori
-- benchmarknamn hamtas fran `Benchmark_ID`
+BI-sparet ar ett nytt downstream-spar for Power BI. Det ska inte lasa `transaktioner.xlsx` direkt i v1 och ska inte ateranvanda Excel-dashboardens artefakter som datakontrakt.
+
+Principer for BI v1:
+
+- egen downstream-artefakt
+- laser gemensam kalla: `data/portfolio_output_timeseries.xlsx`
+- KPI:er for `Overview` och `Performance` raknas i Python, inte i DAX
+- datakontraktet ska redan kunna bara framtida `Structure` och `Category`
+- Excel-sparet ska inte storas
+
+Rekommenderad forsta BI-artefakt:
+
+- `data/portfolio_bi_data.xlsx`
+
+Rekommenderad minimal kodstruktur for BI-sparet:
+
+- `src/bi_prep.py`
+
+Mojlig senare uppdelning nar sparet vuxit:
+
+- `src/bi_io.py`
+- `src/bi_tables.py`
+- `src/bi_metrics.py`
+
+Foreslaget BI-datakontrakt v1 dokumenteras i:
+
+- `docs/powerbi_spar_plan.md`
+
+## Hur sparen halls isar
+
+Gemensamt spar:
+
+- `src/main.py`
+- `src/io_excel.py`
+- `src/portfolio.py`
+- `src/outputs.py`
+- `data/portfolio_output_timeseries.xlsx`
+
+Dashboard/Excel-spar:
+
+- `src/dashboard_prep.py`
+- `src/dashboard_io.py`
+- `src/dashboard_tables.py`
+- `src/dashboard_metrics.py`
+- `src/dashboard_workbook.py`
+- `data/portfolio_dashboard_data.xlsx`
+- `data/portfolio_dashboard.xlsx`
+
+BI-spar:
+
+- framtida `src/bi_prep.py`
+- framtida `data/portfolio_bi_data.xlsx`
+
+Viktig princip:
+
+- gemensamt spar bygger delad kallsanning
+- Excel-sparet konsumerar denna for dashboardbehov
+- BI-sparet konsumerar samma kalla men bygger egen BI-artefakt
+- inget downstream-spar ska lasa det andra sparrets output
 
 ## Batchkorning
 
-Kor hela pipelinen via:
-
-```bat
-Portföljindex.bat
-```
-
-Batchfilen:
-
-1. aktiverar `.venv`
-2. kor `py -m src.main`
-3. kor `py -m src.dashboard_prep` om steg 1 lyckas
-4. skriver logg till `logs/run_YYYYMMDD_HHMMSS.log`
+`Portföljindex.bat` kor idag det gemensamma sparet och dashboard/Excel-sparet. BI-sparet bor inledningsvis hallas separat tills datakontraktet ar implementerat och verifierat.
 
 ## Vanliga fel
 
@@ -193,4 +223,4 @@ Fel tecken kan skapa stora hopp i indexserierna.
 
 ---
 
-Senast uppdaterad: 2026-03-12
+Senast uppdaterad: 2026-03-16

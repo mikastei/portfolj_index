@@ -173,15 +173,29 @@ def build_allocation_snapshot(
     variant_map = series_definition.set_index("Series_ID")["Variant"].to_dict()
     snapshot = portfolio_series_map.copy()
     snapshot["Variant"] = snapshot["Series_ID"].map(variant_map)
+    if "Display_Name" not in snapshot.columns:
+        snapshot["Display_Name"] = snapshot["Yahoo_Ticker"]
+    snapshot["Display_Name"] = (
+        snapshot["Display_Name"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .where(lambda s: s != "", snapshot["Yahoo_Ticker"].fillna("").astype(str).str.strip())
+    )
     columns = [
         "Portfolio_Name",
         "Series_ID",
         "Variant",
+        "Display_Name",
         "Yahoo_Ticker",
         "Weight",
         "Weight_Source",
     ]
-    return snapshot.loc[:, columns].sort_values(["Portfolio_Name", "Variant", "Yahoo_Ticker"]).reset_index(drop=True)
+    return (
+        snapshot.loc[:, columns]
+        .sort_values(["Portfolio_Name", "Variant", "Display_Name", "Yahoo_Ticker"])
+        .reset_index(drop=True)
+    )
 
 
 def build_dashboard_config() -> pd.DataFrame:
@@ -189,7 +203,7 @@ def build_dashboard_config() -> pd.DataFrame:
     return pd.DataFrame(
         [
             {"Config_Key": "default_variant", "Config_Value": "REAL"},
-            {"Config_Key": "default_period", "Config_Value": "Since_Start"},
+            {"Config_Key": "default_period", "Config_Value": "1Y"},
             {"Config_Key": "include_series_types", "Config_Value": "PORT,BM"},
         ]
     )

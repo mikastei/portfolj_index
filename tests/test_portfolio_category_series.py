@@ -6,6 +6,7 @@ from src.portfolio import (
     COL_AFFARSDAG,
     COL_PORTFOLJ,
     EngineInputs,
+    build_portfolio_series_map,
     build_portfolios_and_benchmarks,
     build_series_definition,
     slug,
@@ -47,6 +48,7 @@ def test_series_definition_adds_slugged_real_category_series(base_frames):
         [
             {
                 "ISIN": "SE0001",
+                "Name": "Sverige Indexfond",
                 "Yahoo_Ticker": "AAA",
                 "Instrument_Type": "Fund",
                 "Price_Currency": "SEK",
@@ -94,6 +96,7 @@ def test_real_category_series_is_flat_without_holdings_and_written_to_outputs(ba
         [
             {
                 "ISIN": "SE0001",
+                "Name": "Sverige Indexfond",
                 "Yahoo_Ticker": "AAA",
                 "Instrument_Type": "Fund",
                 "Price_Currency": "SEK",
@@ -155,6 +158,7 @@ def test_missing_category_for_real_holding_raises(base_frames):
         [
             {
                 "ISIN": "SE0001",
+                "Name": "Sverige Indexfond",
                 "Yahoo_Ticker": "AAA",
                 "Instrument_Type": "Fund",
                 "Price_Currency": "SEK",
@@ -245,3 +249,49 @@ def test_category_real_uses_sleeve_returns_for_internal_reallocation():
     assert category_series.loc[pd.Timestamp("2024-01-02"), "RET"] == pytest.approx(0.0)
     assert category_series.loc[pd.Timestamp("2024-01-03"), "RET"] == pytest.approx(0.01)
     assert category_series["RET"].abs().max() < 0.30
+
+
+def test_build_portfolio_series_map_includes_real_snapshot_from_transactions(base_frames):
+    portfolio_metadata, benchmarks, fondertabell, prices = base_frames
+    mapping = pd.DataFrame(
+        [
+            {
+                "ISIN": "SE0001",
+                "Name": "Sverige Indexfond",
+                "Yahoo_Ticker": "AAA",
+                "Instrument_Type": "Fund",
+                "Price_Currency": "SEK",
+                "Category": "Sverige",
+            }
+        ]
+    )
+    transactions = pd.DataFrame(
+        [
+            {
+                "Portfolio_Name": "EGEN",
+                COL_AFFARSDAG: pd.Timestamp("2024-01-02"),
+                "ISIN": "SE0001",
+                "Antal": 1.0,
+                "Transaktionstyp": BUY,
+                "Belopp": -110.0,
+                "Valuta": "SEK",
+            }
+        ]
+    )
+
+    portfolio_series_map = build_portfolio_series_map(
+        portfolio_metadata,
+        transactions,
+        mapping,
+        fondertabell,
+        prices,
+        base_currency="SEK",
+    )
+
+    real_rows = portfolio_series_map.loc[portfolio_series_map["Series_ID"] == "PORT_EGEN_REAL"].copy()
+
+    assert not real_rows.empty
+    assert real_rows["Display_Name"].tolist() == ["Sverige Indexfond"]
+    assert real_rows["Yahoo_Ticker"].tolist() == ["AAA"]
+    assert real_rows["Weight_Source"].tolist() == ["REAL"]
+    assert real_rows["Weight"].iloc[0] == pytest.approx(1.0)
