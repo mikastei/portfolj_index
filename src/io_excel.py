@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Iterable
 
@@ -10,6 +11,11 @@ from openpyxl import load_workbook
 
 COL_AFFARSDAG = "Aff\u00e4rsdag"
 COL_PORTFOLJ = "Portf\u00f6lj"
+CRITICAL_FORMULA_COLUMNS = {
+    "Transactions": ("Belopp", "Inköpsvärde", "Inkopsvarde"),
+}
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -52,21 +58,78 @@ def _find_table(ws, table_name: str):
     raise KeyError(f"Could not find Excel table '{table_name}' on sheet '{ws.title}'")
 
 
+def _raise_on_missing_cached_formulas(
+    path: str | Path,
+    sheet_name: str,
+    table_ref: str,
+    table_name: str,
+    value_rows,
+) -> None:
+    critical_columns = CRITICAL_FORMULA_COLUMNS.get(table_name)
+    if not critical_columns or not value_rows:
+        return
+
+    wb_formula = load_workbook(path, data_only=False, read_only=False)
+    try:
+        ws_formula = wb_formula[sheet_name]
+        formula_rows = ws_formula[table_ref]
+        if not formula_rows:
+            return
+
+        header = [str(cell.value).strip() if cell.value is not None else "" for cell in formula_rows[0]]
+        column_indexes = {
+            column_name: idx for idx, column_name in enumerate(header) if column_name in critical_columns
+        }
+        if not column_indexes:
+            return
+
+        issues: list[str] = []
+        for table_row_number, (formula_row, value_row) in enumerate(zip(formula_rows[1:], value_rows[1:]), start=1):
+            for column_name, idx in column_indexes.items():
+                formula_cell = formula_row[idx]
+                value_cell = value_row[idx]
+                if formula_cell.data_type != "f" or value_cell.value is not None:
+                    continue
+                issues.append(
+                    f"{column_name} {formula_cell.coordinate} (tabellrad {table_row_number}, formel {formula_cell.value})"
+                )
+
+        if not issues:
+            return
+
+        preview = "; ".join(issues[:5])
+        if len(issues) > 5:
+            preview = f"{preview}; +{len(issues) - 5} till"
+        message = (
+            f"Excel table '{table_name}' on sheet '{sheet_name}' contains formula cells without cached values "
+            f"in critical columns: {preview}. The workbook is loaded with data_only=True, so openpyxl reads "
+            f"these cells as blank/None until the workbook has been recalculated and saved in Excel."
+        )
+        logger.error(message)
+        raise ValueError(message)
+    finally:
+        wb_formula.close()
+
+
 def _table_to_dataframe(path: str | Path, table_name: str) -> pd.DataFrame:
     wb = load_workbook(path, data_only=True, read_only=False)
-    for ws in wb.worksheets:
-        try:
-            table = _find_table(ws, table_name)
-        except KeyError:
-            continue
+    try:
+        for ws in wb.worksheets:
+            try:
+                table = _find_table(ws, table_name)
+            except KeyError:
+                continue
 
-        rows = ws[table.ref]
-        raw = [[cell.value for cell in row] for row in rows]
-        if not raw:
-            return pd.DataFrame()
-        header = [str(h).strip() if h is not None else "" for h in raw[0]]
-        data = raw[1:]
-        return _normalize_columns(pd.DataFrame(data, columns=header))
+            rows = ws[table.ref]
+            _raise_on_missing_cached_formulas(path, ws.title, table.ref, table_name, rows)
+            raw = [[cell.value for cell in row] for row in rows]
+            if not raw:
+                return pd.DataFrame()
+            header = [str(h).strip() if h is not None else "" for h in raw[0]]
+            data = raw[1:]
+            return _normalize_columns(pd.DataFrame(data, columns=header))
+    finally:
+        wb.close()
 
     raise ValueError(f"Structured table '{table_name}' not found in {path}")
 

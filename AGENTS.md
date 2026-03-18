@@ -148,6 +148,19 @@ Nar beteende andras bor agenten:
 - kontrollera att befintlig funktionalitet inte bryts
 - foresla tester om det ar relevant
 
+Vid arbete med Excel-filer (`.xlsx`) som innehaller formler ska agenten vara uppmarksam pa att:
+
+- `openpyxl` inte beraknar Excel-formler
+- sparning via `openpyxl` kan gora att formelcacher blir tomma eller inaktuella
+- lasning med `data_only=True` ar beroende av att giltiga cachevarden redan finns sparade i filen
+
+Om en arbetsbok innehaller affarskritiska formler ska agenten uttryckligen bedoma om filen bor:
+
+- behandlas som radata utan beroende av formelcache, eller
+- oppnas/sparas via riktig Excel efter andring for att sakerstalla omrakning
+
+Detta ska sarskilt beaktas nar Python-skript skriver till arbetsbocker som senare lases av andra skript eller steg i flodet.
+
 Om agenten inte kan kora Python, pytest eller andra verifieringskommandon i sin miljo ska agenten:
 
 - behandla detta som en miljobegransning, inte automatiskt som ett projektfel
