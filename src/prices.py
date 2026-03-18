@@ -137,7 +137,15 @@ def fetch_prices_yahoo(
             if attempt < 3:
                 time.sleep(sleep_s)
         if downloaded.empty:
-            raise ValueError(f"Failed to download prices after retries: {last_error}")
+            if incremental and cache_hit and has_all_cols:
+                logger.warning(
+                    "Yahoo returned no new rows for incremental fetch %s -> %s; using cached prices through %s",
+                    fetch_start.date().isoformat(),
+                    requested_end.date().isoformat(),
+                    pd.Timestamp(cached.index.max()).date().isoformat(),
+                )
+            else:
+                raise ValueError(f"Failed to download prices after retries: {last_error}")
 
     if cache_hit:
         merged = cached.copy()

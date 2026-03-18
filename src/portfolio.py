@@ -160,22 +160,77 @@ def _portfolio_name_col(df: pd.DataFrame) -> str | None:
     return None
 
 
-def _display_name_map_from_mapping(mapping: pd.DataFrame) -> dict[str, str]:
+def _first_unique_nonempty(values: pd.Series) -> object:
+    cleaned = []
+    for value in values.dropna():
+        text = str(value).strip()
+        if text and text.upper() not in {"NAN", "NONE"}:
+            cleaned.append(text)
+    unique_values = list(dict.fromkeys(cleaned))
+    if len(unique_values) == 1:
+        return unique_values[0]
+    return None
+
+
+def _instrument_metadata_by_ticker(mapping: pd.DataFrame) -> pd.DataFrame:
     if "Yahoo_Ticker" not in mapping.columns:
-        return {}
+        return pd.DataFrame(
+            columns=[
+                "Yahoo_Ticker",
+                "ISIN",
+                "Display_Name",
+                COL_PRICE_CCY,
+                "Instrument_Type",
+                "Category",
+            ]
+        )
 
     map_df = mapping.copy()
     map_df["Yahoo_Ticker"] = map_df["Yahoo_Ticker"].fillna("").astype(str).str.strip()
     map_df = map_df[map_df["Yahoo_Ticker"] != ""]
     if map_df.empty:
-        return {}
+        return pd.DataFrame(
+            columns=[
+                "Yahoo_Ticker",
+                "ISIN",
+                "Display_Name",
+                COL_PRICE_CCY,
+                "Instrument_Type",
+                "Category",
+            ]
+        )
 
     if "Name" in map_df.columns:
         map_df["Display_Name"] = map_df["Name"].fillna("").astype(str).str.strip()
     else:
         map_df["Display_Name"] = ""
     map_df["Display_Name"] = map_df["Display_Name"].where(map_df["Display_Name"] != "", map_df["Yahoo_Ticker"])
-    return map_df.groupby("Yahoo_Ticker", as_index=True)["Display_Name"].first().to_dict()
+
+    if COL_PRICE_CCY in map_df.columns:
+        map_df[COL_PRICE_CCY] = map_df[COL_PRICE_CCY].fillna("").astype(str).str.upper().str.strip()
+    else:
+        map_df[COL_PRICE_CCY] = ""
+
+    for column in ("ISIN", "Instrument_Type", "Category"):
+        if column not in map_df.columns:
+            map_df[column] = ""
+        map_df[column] = map_df[column].fillna("").astype(str).str.strip()
+
+    grouped = (
+        map_df.groupby("Yahoo_Ticker", as_index=False)
+        .agg(
+            ISIN=("ISIN", _first_unique_nonempty),
+            Display_Name=("Display_Name", _first_unique_nonempty),
+            Price_Currency=(COL_PRICE_CCY, _first_unique_nonempty),
+            Instrument_Type=("Instrument_Type", _first_unique_nonempty),
+            Category=("Category", _first_unique_nonempty),
+        )
+    )
+    grouped["Display_Name"] = grouped["Display_Name"].where(
+        grouped["Display_Name"].notna() & (grouped["Display_Name"].astype(str).str.strip() != ""),
+        grouped["Yahoo_Ticker"],
+    )
+    return grouped
 
 
 def _portfolio_rows(portfolio_metadata: pd.DataFrame) -> list[pd.Series]:
@@ -791,6 +846,7 @@ def build_series_definition(
     model_tickers: list[str],
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
+    instrument_meta = _instrument_metadata_by_ticker(mapping).set_index("Yahoo_Ticker", drop=False)
     tx_all = transactions.copy()
     if "Portfolio_ID" not in tx_all.columns and "Dep\u00e5" in tx_all.columns:
         tx_all["Portfolio_ID"] = tx_all["Dep\u00e5"]
@@ -816,6 +872,9 @@ def build_series_definition(
                     "Variant": suffix,
                     "Benchmark_ID": None,
                     "Yahoo_Ticker": None,
+                    "ISIN": None,
+                    "Display_Name": None,
+                    "Price_Currency": None,
                     "Instrument_Type": None,
                     "Category": None,
                     "Include_From_Date": idx_start,
@@ -839,6 +898,9 @@ def build_series_definition(
                     "Variant": "REAL",
                     "Benchmark_ID": None,
                     "Yahoo_Ticker": None,
+                    "ISIN": None,
+                    "Display_Name": None,
+                    "Price_Currency": None,
                     "Instrument_Type": None,
                     "Category": category,
                     "Include_From_Date": idx_start,
@@ -852,6 +914,14 @@ def build_series_definition(
     idx0 = float(default_meta["Initial_Index_Value"])
 
     for _, row in benchmarks.iterrows():
+        ticker = str(row["Yahoo_Ticker"]).strip()
+        info = instrument_meta.loc[ticker] if ticker in instrument_meta.index else None
+        benchmark_price_currency = None
+        if COL_PRICE_CCY in row.index:
+            price_ccy_raw = row[COL_PRICE_CCY]
+            if pd.notna(price_ccy_raw) and str(price_ccy_raw).strip():
+                benchmark_price_currency = str(price_ccy_raw).strip().upper()
+
         rows.append(
             {
                 "Series_ID": f"BM_{slug(row['Benchmark_ID'])}",
@@ -859,25 +929,20 @@ def build_series_definition(
                 "Portfolio_Name": None,
                 "Variant": None,
                 "Benchmark_ID": row["Benchmark_ID"],
-                "Yahoo_Ticker": row["Yahoo_Ticker"],
-                "Instrument_Type": None,
-                "Category": None,
+                "Yahoo_Ticker": ticker,
+                "ISIN": info["ISIN"] if info is not None else None,
+                "Display_Name": info["Display_Name"] if info is not None else None,
+                "Price_Currency": benchmark_price_currency or (info[COL_PRICE_CCY] if info is not None else None),
+                "Instrument_Type": info["Instrument_Type"] if info is not None else None,
+                "Category": info["Category"] if info is not None else None,
                 "Include_From_Date": pd.to_datetime(row["Include_From_Date"], errors="coerce"),
                 "Index_Start_Date": idx_start,
                 "Initial_Index_Value": idx0,
             }
         )
 
-    mp = mapping.copy()
-    mp["Yahoo_Ticker"] = mp["Yahoo_Ticker"].astype(str).str.strip()
-    mp = mp[mp["Yahoo_Ticker"] != ""]
-    map_info = mp.groupby("Yahoo_Ticker", as_index=False).agg(
-        Instrument_Type=("Instrument_Type", "first"),
-        Category=("Category", "first"),
-    )
-
     for ticker in sorted(set(real_tickers) | set(model_tickers)):
-        info = map_info[map_info["Yahoo_Ticker"] == ticker]
+        info = instrument_meta.loc[ticker] if ticker in instrument_meta.index else None
         rows.append(
             {
                 "Series_ID": f"AST_{slug(ticker)}",
@@ -886,8 +951,11 @@ def build_series_definition(
                 "Variant": None,
                 "Benchmark_ID": None,
                 "Yahoo_Ticker": ticker,
-                "Instrument_Type": info["Instrument_Type"].iloc[0] if not info.empty else None,
-                "Category": info["Category"].iloc[0] if not info.empty else None,
+                "ISIN": info["ISIN"] if info is not None else None,
+                "Display_Name": info["Display_Name"] if info is not None else ticker,
+                "Price_Currency": info[COL_PRICE_CCY] if info is not None else None,
+                "Instrument_Type": info["Instrument_Type"] if info is not None else None,
+                "Category": info["Category"] if info is not None else None,
                 "Include_From_Date": idx_start,
                 "Index_Start_Date": idx_start,
                 "Initial_Index_Value": np.nan,
@@ -1106,7 +1174,7 @@ def build_portfolio_series_map(
     base_currency: str = "SEK",
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
-    display_name_map = _display_name_map_from_mapping(mapping)
+    instrument_meta = _instrument_metadata_by_ticker(mapping).set_index("Yahoo_Ticker", drop=False)
     meta_rows = _portfolio_rows(portfolio_metadata)
     tx_all = transactions.copy()
     if "Portfolio_ID" not in tx_all.columns and "Dep\u00e5" in tx_all.columns:
@@ -1156,11 +1224,14 @@ def build_portfolio_series_map(
                 portfolio_name=portfolio_name,
             )
             for ticker, weight in real_w.items():
+                info = instrument_meta.loc[ticker] if ticker in instrument_meta.index else None
                 rows.append(
                     {
                         "Portfolio_Name": portfolio_name,
                         "Series_ID": f"PORT_{slug(portfolio_name)}_REAL",
-                        "Display_Name": display_name_map.get(ticker, ticker),
+                        "ISIN": info["ISIN"] if info is not None else None,
+                        "Display_Name": info["Display_Name"] if info is not None else ticker,
+                        "Price_Currency": info[COL_PRICE_CCY] if info is not None else None,
                         "Yahoo_Ticker": ticker,
                         "Weight": float(weight),
                         "Weight_Source": "REAL",
@@ -1173,22 +1244,28 @@ def build_portfolio_series_map(
         tgt_w = _weights_from_fonder(fonder_p, "AndelP", portfolio_name=portfolio_name)
 
         for ticker, weight in cur_w.items():
+            info = instrument_meta.loc[ticker] if ticker in instrument_meta.index else None
             rows.append(
                 {
                     "Portfolio_Name": portfolio_name,
                     "Series_ID": f"PORT_{slug(portfolio_name)}_CUR",
-                    "Display_Name": display_name_map.get(ticker, ticker),
+                    "ISIN": info["ISIN"] if info is not None else None,
+                    "Display_Name": info["Display_Name"] if info is not None else ticker,
+                    "Price_Currency": info[COL_PRICE_CCY] if info is not None else None,
                     "Yahoo_Ticker": ticker,
                     "Weight": float(weight),
                     "Weight_Source": "Andel",
                 }
             )
         for ticker, weight in tgt_w.items():
+            info = instrument_meta.loc[ticker] if ticker in instrument_meta.index else None
             rows.append(
                 {
                     "Portfolio_Name": portfolio_name,
                     "Series_ID": f"PORT_{slug(portfolio_name)}_TGT",
-                    "Display_Name": display_name_map.get(ticker, ticker),
+                    "ISIN": info["ISIN"] if info is not None else None,
+                    "Display_Name": info["Display_Name"] if info is not None else ticker,
+                    "Price_Currency": info[COL_PRICE_CCY] if info is not None else None,
                     "Yahoo_Ticker": ticker,
                     "Weight": float(weight),
                     "Weight_Source": "AndelP",

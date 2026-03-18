@@ -29,7 +29,10 @@ Excel-sparet bygger vidare darifran:
 - `data/portfolio_dashboard_data.xlsx`
 - `data/portfolio_dashboard.xlsx`
 
-Power BI har annu ingen egen artefakt eller egen prep-modul.
+Power BI har nu en egen artefakt och en egen prep-modul:
+
+- `src/bi_prep.py`
+- `data/portfolio_bi_data.xlsx`
 
 ## Lasta beslut
 
@@ -57,6 +60,7 @@ Materialiserar redan:
 - variant: `Variant`
 - benchmarkkoppling: `Benchmark_ID`
 - instrumentkoppling for `AST` och benchmark: `Yahoo_Ticker`
+- instrumentmetadata: `ISIN`, `Display_Name`, `Price_Currency`
 - instrumentmetadata: `Instrument_Type`
 - kategoribegrepp: `Category`
 - tidsstartregler: `Include_From_Date`, `Index_Start_Date`
@@ -74,6 +78,7 @@ Materialiserar redan:
 - portfolj: `Portfolio_Name`
 - serie: `Series_ID`
 - instrument: `Yahoo_Ticker`
+- instrumentmetadata: `ISIN`, `Display_Name`, `Price_Currency`
 - nuvarande vikt: `Weight`
 - viktsource: `Weight_Source`
 
@@ -144,6 +149,9 @@ Maste folja med i BI-v1:
 - `Benchmark_ID`
 - `Category`
 - `Yahoo_Ticker`
+- `ISIN`
+- `Display_Name`
+- `Price_Currency`
 - `Instrument_Type`
 - `Index_Start_Date`
 - `Include_From_Date`
@@ -161,9 +169,6 @@ Maste folja med i BI-v1:
 
 Bor folja med om de redan finns i upstreamtabellerna utan stor extra kostnad:
 
-- instrumentnamn om `Mapping.Name` finns
-- `ISIN`
-- `Price_Currency`
 - portfolj-ID om `Portfolio_Metadata` faktiskt har `Portfolio_ID`
 
 ## Vad som inte behover folja med i BI v1
@@ -248,7 +253,7 @@ Kolumner:
 - `Instrument_Key` rekommenderat `Yahoo_Ticker` i v1
 - `Yahoo_Ticker`
 - `ISIN` nullable
-- `Instrument_Name` nullable
+- `Display_Name` nullable
 - `Instrument_Type`
 - `Category`
 - `Structure` nullable
@@ -344,6 +349,9 @@ Kolumner:
 - `Portfolio_Key`
 - `Series_ID`
 - `Instrument_Key`
+- `ISIN`
+- `Display_Name`
+- `Price_Currency`
 - `Weight`
 - `Weight_Source`
 - `Snapshot_Date`
@@ -380,7 +388,7 @@ Dimensioner:
 
 ## Rekommenderad minimal kodstruktur
 
-Minsta nya BI-spar i kod:
+Nuvarande BI-spar i kod:
 
 - `src/bi_prep.py`
 
@@ -424,8 +432,8 @@ Excel/dashboard-sparet:
 
 BI-sparet:
 
-- framtida `src/bi_prep.py`
-- framtida `data/portfolio_bi_data.xlsx`
+- `src/bi_prep.py`
+- `data/portfolio_bi_data.xlsx`
 
 Gemensam dataartefakt:
 
@@ -448,7 +456,6 @@ Viktig regel:
 
 Risker:
 
-- `Portfolio_Series_Map` saknar idag viss instrumentmetadata och kan behova enrichas i BI-sparet
 - kategori ligger delvis pa serieniva och delvis implicit pa instrumentniva; detta bor goras tydligare i BI-dimensionerna
 - om `Yahoo_Ticker` inte ar stabilt unikt over tid kan en framtida riktig `Instrument_Key` behovas
 
@@ -456,8 +463,7 @@ Oppna fragor:
 
 - finns ett verkligt upstream-falt for framtida `Structure`, eller maste det laggas till senare?
 - ska BI-v1 inkludera benchmark i KPI-fakta fullt ut eller endast i daily performance?
-- ska `Dim_Date` materialiseras i Python eller genereras i Power BI-modellen?
-- ska BI-artefakten redan i v1 vara Excel, CSV-set eller Parquet?
+- nar ar det vart att byta BI-artefakten fran Excel till Parquet eller CSV-set?
 
 ## Rekommenderad riktning
 
@@ -472,10 +478,19 @@ Den enklaste korrekta riktningen ar:
 
 ## Rekommenderat nasta implementationsteg
 
-Nasta steg bor vara att implementera ett forsta `src/bi_prep.py` som:
+Datakontraktet ar nu implementerat i `src/bi_prep.py`, som skriver:
 
-- laser `Series_Definition`, `Portfolio_Series_Map`, `Master_TimeSeries_Long` och `Run_Config`
-- bygger `Dim_Series`, `Fact_Series_Daily`, `Fact_Series_KPI` och `Fact_Portfolio_Allocation_Snapshot`
-- skriver `data/portfolio_bi_data.xlsx`
+- `Dim_Date`
+- `Dim_Portfolio`
+- `Dim_Series`
+- `Dim_Instrument`
+- `Fact_Series_Daily`
+- `Fact_Series_KPI`
+- `Fact_Portfolio_Alloc_Snapshot`
 
-Detta ar minsta praktiska steg som etablerar BI-sparet utan att andra Excel-sparet eller skriva om upstream-pipelinen.
+Nasta prioriterade steg bor darfor vara att definiera eller bygga en forsta Power BI-MVP for:
+
+- `Overview`
+- `Performance`
+
+med `Structure` fortsatt datamassigt forberett via snapshot-faktan.

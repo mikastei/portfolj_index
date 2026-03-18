@@ -6,7 +6,7 @@ Projektet har nu ett gemensamt upstream-spar och tva separata downstream-spar:
 
 1. gemensamt spar som bygger `data/portfolio_output_timeseries.xlsx`
 2. dashboard/Excel-spar som bygger dashboardunderlag och workbook
-3. BI-spar som senare ska bygga en separat BI-artefakt for Power BI
+3. BI-spar som bygger en separat BI-artefakt for Power BI
 
 ## Gemensamt spar
 
@@ -54,7 +54,7 @@ Nuvarande gemensamt materialiserad metadata omfattar bland annat:
 
 - portfolj: `Portfolio_Name`, `Index_Start_Date`, `Initial_Index_Value`
 - serie: `Series_ID`, `Series_Type`, `Variant`, `Benchmark_ID`
-- instrument/serie: `Yahoo_Ticker`, `Instrument_Type`, `Category`
+- instrument/serie: `Yahoo_Ticker`, `ISIN`, `Display_Name`, `Price_Currency`, `Instrument_Type`, `Category`
 - korning: `Timestamp`, paths, `BASE_CURRENCY`, `RF_RATE_ANNUAL`, `TRADING_DAYS_PER_YEAR`
 - struktur-snapshot: `Portfolio_Series_Map` med aktuella vikter per `Series_ID` och ticker
 
@@ -146,11 +146,11 @@ Principer for BI v1:
 - datakontraktet ska redan kunna bara framtida `Structure` och `Category`
 - Excel-sparet ska inte storas
 
-Rekommenderad forsta BI-artefakt:
+Nuvarande BI-artefakt:
 
 - `data/portfolio_bi_data.xlsx`
 
-Rekommenderad minimal kodstruktur for BI-sparet:
+Nuvarande minimal kodstruktur for BI-sparet:
 
 - `src/bi_prep.py`
 
@@ -186,8 +186,8 @@ Dashboard/Excel-spar:
 
 BI-spar:
 
-- framtida `src/bi_prep.py`
-- framtida `data/portfolio_bi_data.xlsx`
+- `src/bi_prep.py`
+- `data/portfolio_bi_data.xlsx`
 
 Viktig princip:
 
@@ -198,7 +198,7 @@ Viktig princip:
 
 ## Batchkorning
 
-`Portföljindex.bat` kor idag det gemensamma sparet och dashboard/Excel-sparet. BI-sparet bor inledningsvis hallas separat tills datakontraktet ar implementerat och verifierat.
+`Portföljindex.bat` kor idag det gemensamma sparet och dashboard/Excel-sparet. BI-sparet finns nu som separat steg men bor fortsatt hallas utanfor ordinarie batch tills rapportsparet ar mer stabilt.
 
 ## Vanliga fel
 

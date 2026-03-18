@@ -1,4 +1,4 @@
-# Teknisk sammanfattning for Portfolio_index och Dashboard_prep
+# Teknisk sammanfattning for Portfolio_index, Dashboard_prep och BI_prep
 
 ## 1. Relevanta filer/mappar
 
@@ -10,6 +10,7 @@ Portfoljindex/
 │  ├─ dashboard_io.py
 │  ├─ dashboard_tables.py
 │  ├─ dashboard_metrics.py
+│  ├─ bi_prep.py
 │  ├─ config.py
 │  ├─ io_excel.py
 │  ├─ portfolio.py
@@ -20,7 +21,8 @@ Portfoljindex/
 ├─ data/
 │  ├─ cache_prices.parquet
 │  ├─ portfolio_output_timeseries.xlsx
-│  └─ portfolio_dashboard_data.xlsx
+│  ├─ portfolio_dashboard_data.xlsx
+│  └─ portfolio_bi_data.xlsx
 ├─ dev/
 ├─ logs/
 ├─ Portföljindex.bat
@@ -34,6 +36,7 @@ Primara entry points:
 
 - `src/main.py` -> `py -m src.main`
 - `src/dashboard_prep.py` -> `py -m src.dashboard_prep`
+- `src/bi_prep.py` -> `py -m src.bi_prep`
 
 Batchkorning via `Portföljindex.bat`:
 
@@ -59,6 +62,12 @@ Dashboard_prep:
 - `dashboard_io.py`: inlasning, validering och byggande av analysuniversum
 - `dashboard_tables.py`: bygger dashboardtabeller
 - `dashboard_metrics.py`: periodlogik, KPI-berakningar och korrelationer
+
+BI_prep:
+
+- `bi_prep.py`: orchestration for separat BI-datakontrakt
+- ateranvander validering fran `dashboard_io.py`
+- ateranvander period- och KPI-logik fran `dashboard_metrics.py`
 
 Gemensamt:
 
@@ -103,8 +112,8 @@ Workbooken skrivs i `write_output_excel` i `src/outputs.py` med bladen:
 Viktiga kolumner:
 
 - `Master_TimeSeries_Long`: `Date`, `Series_ID`, `RET`, `IDX`, `DD`
-- `Series_Definition`: `Series_ID`, `Series_Type`, `Portfolio_Name`, `Variant`, `Benchmark_ID`, `Yahoo_Ticker`, `Instrument_Type`, `Category`, `Include_From_Date`, `Index_Start_Date`, `Initial_Index_Value`
-- `Portfolio_Series_Map`: `Portfolio_Name`, `Series_ID`, `Yahoo_Ticker`, `Weight`, `Weight_Source`
+- `Series_Definition`: `Series_ID`, `Series_Type`, `Portfolio_Name`, `Variant`, `Benchmark_ID`, `Yahoo_Ticker`, `ISIN`, `Display_Name`, `Price_Currency`, `Instrument_Type`, `Category`, `Include_From_Date`, `Index_Start_Date`, `Initial_Index_Value`
+- `Portfolio_Series_Map`: `Portfolio_Name`, `Series_ID`, `ISIN`, `Display_Name`, `Yahoo_Ticker`, `Price_Currency`, `Weight`, `Weight_Source`
 - `Run_Config`: `Timestamp`, `PATH_TRANSAKTIONER`, `PATH_FONDER`, `OUTPUT_PATH`, `RF_RATE_ANNUAL`, `BASE_CURRENCY`, `TRADING_DAYS_PER_YEAR`, `FORWARD_FILL`, `NO_REBALANCING`
 
 Seriekonventioner:
@@ -218,22 +227,54 @@ Riskfri ranta och handelsdagar per ar lases fran `Run_Config`.
 - minst 20 gemensamma observationer
 - endast unika seriepar, inga diagonalpar
 
-## 8. Viktiga designprinciper i nulaget
+## 8. Steg 3 - BI_prep
+
+Input:
+
+- `data/portfolio_output_timeseries.xlsx`
+
+Lasning och validering:
+
+- ateranvander `load_dashboard_source` i `src/dashboard_io.py`
+
+Output:
+
+- `data/portfolio_bi_data.xlsx`
+
+Workbooken skrivs i `src/bi_prep.py` med bladen:
+
+- `Dim_Date`
+- `Dim_Portfolio`
+- `Dim_Series`
+- `Dim_Instrument`
+- `Fact_Series_Daily`
+- `Fact_Series_KPI`
+- `Fact_Portfolio_Alloc_Snapshot`
+
+## 9. Viktiga designprinciper i nulaget
 
 - `Portfolio_index` ar kallsanningen for tidsserier
 - `Dashboard_prep` gor endast downstream-transformering for dashboardbruk
+- `BI_prep` gor separat downstream-transformering for Power BI-bruk
 - ingen ny prisnedladdning sker i dashboardsteget
+- ingen ny prisnedladdning sker i BI-steget
 - batchfilen kor stegen sekventiellt men kodbasen behaller dem som separata entry points
 - kategoriunika REAL-serier betraktas som analysserier, inte bara intern metadata
+- downstream-spaaren ska inte lasa varandras output
 
-## 9. Reproducerbarhet och felsokning
+## 10. Reproducerbarhet och felsokning
 
 For felsokning ar dessa artefakter viktigast:
 
 - `logs/run_*.log`
 - `data/portfolio_output_timeseries.xlsx`
 - `data/portfolio_dashboard_data.xlsx`
+- `data/portfolio_bi_data.xlsx`
 - `Run_Config` i steg 1
 - `Build_Info` i steg 2
 
-Senast uppdaterad: 2026-03-12
+BI-sparet kors i nulaget separat via:
+
+- `py -m src.bi_prep`
+
+Senast uppdaterad: 2026-03-16

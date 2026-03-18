@@ -11,6 +11,8 @@ PORTFOLIO_OUTPUT_PATH = BASE_DIR / "data" / "portfolio_output_timeseries.xlsx"
 DASHBOARD_DATA_SOURCE_PATH = PORTFOLIO_OUTPUT_PATH
 DASHBOARD_DATA_OUTPUT_PATH = BASE_DIR / "data" / "portfolio_dashboard_data.xlsx"
 DASHBOARD_WORKBOOK_OUTPUT_PATH = BASE_DIR / "data" / "portfolio_dashboard.xlsx"
+BI_DATA_SOURCE_PATH = PORTFOLIO_OUTPUT_PATH
+BI_DATA_OUTPUT_PATH = BASE_DIR / "data" / "portfolio_bi_data.xlsx"
 
 # Temporary aliases kept to avoid a half-migrated config surface.
 OUTPUT_PATH = PORTFOLIO_OUTPUT_PATH
