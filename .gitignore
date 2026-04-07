@@ -4,13 +4,13 @@
 # python
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # logs
-*.log
+logs/
 
 # cache
 data/cache_prices.parquet
 
-# excel outputs (om du inte vill checka in dem)
-*.xlsx
-.pytest_cache/
+# generated workbooks
+data/*.xlsx

@@ -2,13 +2,12 @@
 
 Det har projektet bygger ett portfoljindex (bas 100) for en eller flera portfoljer samt benchmarkserier, baserat pa transaktioner och prisdata fran Yahoo Finance.
 
-Projektet har nu ett gemensamt upstream-spar och tva separata downstream-spar:
+Projektet har nu tva spar:
 
-1. gemensamt spar som bygger `data/portfolio_output_timeseries.xlsx`
-2. dashboard/Excel-spar som bygger dashboardunderlag och workbook
-3. BI-spar som bygger en separat BI-artefakt for Power BI
+1. gemensamt upstream-spar som bygger den delade kallsanningen
+2. BI-spar som bygger ett separat Power BI-underlag fran den delade kallsanningen
 
-## Gemensamt spar
+## Gemensamt upstream-spar
 
 ### Syfte
 
@@ -76,97 +75,50 @@ Serietyper:
 
 Kategoriunika REAL-serier byggs per portfolj och kategori och skrivs till `Series_Definition` samt `Master_TimeSeries_Long`.
 
-## Dashboard/Excel-spar
-
-### Syfte
-
-Excel-sparet lever vidare oforandrat och ska fortsatt vara separat fran framtida BI-konsumtion.
-
-Kor dataunderlaget:
-
-```bash
-py -m src.dashboard_prep
-```
-
-Nuvarande Excel/dashboard-filer:
-
-- `src/dashboard_prep.py`
-- `src/dashboard_workbook.py`
-- `data/portfolio_dashboard_data.xlsx`
-- `data/portfolio_dashboard.xlsx`
-
-Dataflode:
-
-```text
-transaktioner.xlsx + fonder.xlsx
-            |
-            v
-      py -m src.main
-            |
-            v
-portfolio_output_timeseries.xlsx
-            |
-            v
-  py -m src.dashboard_prep
-            |
-            v
-portfolio_dashboard_data.xlsx
-            |
-            v
- py -m src.dashboard_workbook
-            |
-            v
-   portfolio_dashboard.xlsx
-```
-
-`portfolio_dashboard_data.xlsx` innehaller:
-
-- `KPI_Summary`
-- `Period_Returns`
-- `Chart_IDX_Wide`
-- `Chart_DD_Wide`
-- `Correlation_Long`
-- `Allocation_Snapshot`
-- `Dashboard_Config`
-- `Build_Info`
-
-Excel-sparet ansvarar for dashboardspecifik KPI-logik, tabellberedning och workbookpresentation. Det ska inte blandas ihop med framtida BI-artefakter.
-
 ## BI-spar
 
 ### Syfte
 
-BI-sparet ar ett nytt downstream-spar for Power BI. Det ska inte lasa `transaktioner.xlsx` direkt i v1 och ska inte ateranvanda Excel-dashboardens artefakter som datakontrakt.
+BI-sparet bygger ett separat datakontrakt for Power BI utan att lasa indatafilerna direkt.
+
+Kor:
+
+```bash
+py -m src.bi_prep
+```
 
 Principer for BI v1:
 
-- egen downstream-artefakt
 - laser gemensam kalla: `data/portfolio_output_timeseries.xlsx`
-- KPI:er for `Overview` och `Performance` raknas i Python, inte i DAX
-- datakontraktet ska redan kunna bara framtida `Structure` och `Category`
-- Excel-sparet ska inte storas
-
-Nuvarande BI-artefakt:
-
-- `data/portfolio_bi_data.xlsx`
+- bygger egen downstream-artefakt: `data/portfolio_bi_data.xlsx`
+- raknar KPI:er i Python, inte i DAX
+- ateranvander inte Excel/dashboard-artefakter
 
 Nuvarande minimal kodstruktur for BI-sparet:
 
 - `src/bi_prep.py`
-
-Mojlig senare uppdelning nar sparet vuxit:
-
 - `src/bi_io.py`
-- `src/bi_tables.py`
 - `src/bi_metrics.py`
 
-Foreslaget BI-datakontrakt v1 dokumenteras i:
+BI-artefakten innehaller:
+
+- `Dim_Date`
+- `Dim_Portfolio`
+- `Dim_Series`
+- `Dim_Instrument`
+- `Fact_Series_Daily`
+- `Fact_Series_KPI`
+- `Fact_Portfolio_Alloc_Snapshot`
+
+Foreslaget BI-datakontrakt och rapportspec finns i:
 
 - `docs/powerbi_spar_plan.md`
+- `docs/powerbi_mvp_v1_spec.md`
+- `docs/powerbi_dax_v1.md`
 
 ## Hur sparen halls isar
 
-Gemensamt spar:
+Gemensamt upstream-spar:
 
 - `src/main.py`
 - `src/io_excel.py`
@@ -174,31 +126,44 @@ Gemensamt spar:
 - `src/outputs.py`
 - `data/portfolio_output_timeseries.xlsx`
 
-Dashboard/Excel-spar:
-
-- `src/dashboard_prep.py`
-- `src/dashboard_io.py`
-- `src/dashboard_tables.py`
-- `src/dashboard_metrics.py`
-- `src/dashboard_workbook.py`
-- `data/portfolio_dashboard_data.xlsx`
-- `data/portfolio_dashboard.xlsx`
-
 BI-spar:
 
 - `src/bi_prep.py`
+- `src/bi_io.py`
+- `src/bi_metrics.py`
 - `data/portfolio_bi_data.xlsx`
 
 Viktig princip:
 
-- gemensamt spar bygger delad kallsanning
-- Excel-sparet konsumerar denna for dashboardbehov
-- BI-sparet konsumerar samma kalla men bygger egen BI-artefakt
-- inget downstream-spar ska lasa det andra sparrets output
+- upstream bygger delad kallsanning
+- BI-sparet konsumerar endast denna kalla
+- inget kvarvarande steg ska bero pa tidigare Excel/dashboard-artefakter
 
 ## Batchkorning
 
-`Portföljindex.bat` kor idag det gemensamma sparet och dashboard/Excel-sparet. BI-sparet finns nu som separat steg men bor fortsatt hallas utanfor ordinarie batch tills rapportsparet ar mer stabilt.
+`Portföljindex.bat` kor nu standardflodet sekventiellt:
+
+```bash
+py -m src.main
+py -m src.bi_prep
+```
+
+`src.bi_prep` kors bara om `src.main` lyckas. BI-sparet finns fortfarande kvar som separat entry point for manuell felsokning eller om BI-underlaget ska byggas om fran befintlig upstream-fil.
+
+## Tester och hjalpskript
+
+Aktiva projektskript:
+
+- `py -m src.main`
+- `py -m src.bi_prep`
+- `Portföljindex.bat`
+
+Projektet har nu ingen separat `dev/`-mapp langre. Hjalpskript och verifiering ligger under `tests/`.
+
+Kvarvarande filer i `tests/`:
+
+- automatiserade tester for upstream-logik
+- `tests/smoke_test_prices.py` for manuellt tekniskt smoketest av prisnedladdning
 
 ## Vanliga fel
 
@@ -223,4 +188,4 @@ Fel tecken kan skapa stora hopp i indexserierna.
 
 ---
 
-Senast uppdaterad: 2026-03-16
+Senast uppdaterad: 2026-04-07

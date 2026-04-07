@@ -4,7 +4,7 @@ chcp 65001 >nul
 
 REM ============================================================
 REM Portfoljindex - run.bat (scheduler-friendly)
-REM - Kor src.main och sedan src.dashboard_prep i projektets .venv
+REM - Kor src.main och sedan src.bi_prep i projektets .venv
 REM - Loggar till logs\run_YYYYMMDD_HHMMSS.log (bredvid .bat)
 REM - Ingen PAUSE (bra for automation)
 REM ============================================================
@@ -54,21 +54,21 @@ py -m src.main >> "%LOG_FILE%" 2>&1
 set "ERR=%ERRORLEVEL%"
 if not "%ERR%"=="0" goto :finish
 
-REM Kor Dashboard_prep
-echo Running: py -m src.dashboard_prep>> "%LOG_FILE%"
-py -m src.dashboard_prep >> "%LOG_FILE%" 2>&1
+REM Kor BI_prep
+echo Running: py -m src.bi_prep>> "%LOG_FILE%"
+py -m src.bi_prep >> "%LOG_FILE%" 2>&1
 set "ERR=%ERRORLEVEL%"
 
 :finish
 REM Avaktivera venv om deactivate finns
-if defined VIRTUAL_ENV (
-  deactivate >> "%LOG_FILE%" 2>&1
+if defined VIRTUAL_ENV if exist ".venv\Scripts\deactivate.bat" (
+  call ".venv\Scripts\deactivate.bat" >> "%LOG_FILE%" 2>&1
 )
 
-echo ============================================================>> "%LOG_FILE%"
-echo End: %date% %time%>> "%LOG_FILE%"
-echo Exit code: %ERR%>> "%LOG_FILE%"
-echo Log: %LOG_FILE%>> "%LOG_FILE%"
-echo ============================================================>> "%LOG_FILE%"
+>> "%LOG_FILE%" echo ============================================================
+>> "%LOG_FILE%" echo End: %date% %time%
+>> "%LOG_FILE%" echo Result code: %ERR%
+>> "%LOG_FILE%" echo Log: %LOG_FILE%
+>> "%LOG_FILE%" echo ============================================================
 
 exit /b %ERR%

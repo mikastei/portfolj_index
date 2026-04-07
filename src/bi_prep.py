@@ -9,8 +9,8 @@ from pathlib import Path
 import pandas as pd
 
 from . import config
-from .dashboard_io import extract_run_parameters, load_dashboard_source
-from .dashboard_metrics import PERIOD_ORDER, compute_kpis, has_minimum_observations, slice_period
+from .bi_io import extract_run_parameters, load_portfolio_output
+from .bi_metrics import PERIOD_ORDER, compute_kpis, has_minimum_observations, slice_period
 
 ANALYSIS_PREFIXES = ("PORT_", "BM_")
 ALLOCATION_SNAPSHOT_SHEET_NAME = "Fact_Portfolio_Alloc_Snapshot"
@@ -374,7 +374,7 @@ def run(
     output_path = Path(bi_output_path or config.BI_DATA_OUTPUT_PATH)
 
     logging.info("Loading BI source workbook: %s", source_path)
-    source = load_dashboard_source(source_path)
+    source = load_portfolio_output(source_path)
     rf_rate_annual, trading_days_per_year = extract_run_parameters(source.run_config)
 
     analysis_metadata = _build_analysis_metadata(source.series_definition, source.master_long)
