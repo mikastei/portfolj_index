@@ -2,336 +2,509 @@
 
 ## Syfte
 
-Detta dokument ar en konkret byggspec for en forsta Power BI-rapport ovanpa `data/portfolio_bi_data.xlsx`.
+Detta dokument beskriver den faktiska Power BI-v1 som nu byggs ovanpa `data/portfolio_bi_data.xlsx`.
 
-Scope for v1:
+Dokumentet ska fungera som:
 
-- endast `Overview`
-- endast `Performance`
-- inga upstream-andringar om de inte ar tydligt nodvandiga
-- ingen direktlasning av `transaktioner.xlsx`
-- kategori-serier ska inte exponeras i rapportytan
-- `REAL` ar standardvariant
-- KPI-period ar separat fran datumslider
-- datumslider far bara styra tidsserievisuals pa `Performance`
+- aktuell specifikation for den faktiska PBIX-modellen
+- gemensam referens for rapportlager, DAX-objekt och avgransningar
+- underlag for att fardigstalla `Overview` och `Performance`
 
-Miljon i denna trad kan inte bygga en faktisk `.pbix`, sa detta dokument ar avsett som direkt underlag for nasta PBIX-steg.
+Detta dokument ar alltsa inte primart en bygginstruktion langre, utan en nulages- och malspec for den Power BI-v1 som nu etablerats.
 
-## Verifierat nulage i `portfolio_bi_data.xlsx`
+## Scope for v1
 
-Verifierad workbookstruktur:
+Ingaar i v1:
 
-- `Dim_Date` med 572 rader
+- `Overview`
+- `Performance`
+- import av hela `portfolio_bi_data.xlsx`
+- liten och stabil datamodell
+- separat urval for primarserie, benchmark och extra jamforelse
+- KPI-period separat fran datumurval
+- kategori-serier kvar i modellen men dolda i v1-ytan
+
+Ingaar inte i v1:
+
+- direktlasning av `transaktioner.xlsx`
+- hardkopplad benchmark per portfolj
+- `Structure`-sida
+- `Category`-sida
+- kategori-serier i synliga slicers eller visuals
+- DAX-berakning av v1-KPI:er som redan finns materialiserade i Python
+
+## Verifierad grunddata
+
+Verifierad workbookstruktur i `data/portfolio_bi_data.xlsx`:
+
+- `Dim_Date` med 574 rader
 - `Dim_Portfolio` med 2 rader
 - `Dim_Series` med 23 rader
 - `Dim_Instrument` med 68 rader
-- `Fact_Series_Daily` med 13138 rader
+- `Fact_Series_Daily` med 13184 rader
 - `Fact_Series_KPI` med 92 rader
 - `Fact_Portfolio_Alloc_Snapshot` med 78 rader
 
-Verifierade portfoljer:
+Verifierat om datakontraktet:
 
-- `EGEN`
-- `PA`
+- modellen har ett litet och fungerande stjarnschema for `Overview` och `Performance`
+- `Fact_Series_Daily` ar huvudfakta for tidsserievisuals
+- `Fact_Series_KPI` ar huvudfakta for KPI-visuals
+- `Dim_Series` ar central dimension for serieselection och rapportlogik
+- kategori-serier finns materialiserade men ska inte exponeras i v1-ytan
 
-Verifierade varianter i huvudserier:
+Verifierat om innehall pa overgripande niva:
 
-- `CUR`
-- `REAL`
-- `TGT`
+- flera huvudserier finns for portfoljer och varianter
+- benchmarkserier finns som eget universum
+- KPI-perioder finns materialiserade i faktat
+- relationell integritet mellan dimensioner och fakta ar verifierad i arbetsboken
+- aktuell datumtackning i modellen ar `2024-01-01` till `2026-03-17`
 
-Verifierade benchmarkserier:
+Viktig princip:
 
-- `BM_Emerging_Markets`
-- `BM_Global_Large`
-- `BM_Intermediate_Core_Bond`
-- `BM_Nordnet_Balanserad`
-- `BM_Nordnet_Offensiv`
-- `BM_OMX_Stockholm_GI`
+- urvalsvarden i slicers ska fortsatt komma fran modellens tabeller
+- dokumentationen ska inte hardkoda en viss lista med valbara portfoljer, varianter, benchmark eller extra jamforelser
 
-Verifierade KPI-perioder:
+## Faktisk modell i PBIX
 
-- `30D`
-- `YTD`
-- `1Y`
-- `Since_Start`
+### Importomfang
 
-Verifierade flaggor i `Dim_Series`:
+Alla tabeller i `portfolio_bi_data.xlsx` ar importerade till PBIX:en.
 
-- `Is_Main_Portfolio_Series = TRUE`: 6 serier
-- `Is_Category_Series = TRUE`: 11 serier
-- `Is_Benchmark = TRUE`: 6 serier
-- `Is_Overview_Eligible = TRUE`: 12 serier
-- `Is_Performance_Eligible = TRUE`: 23 serier
+Detta ar accepterat i v1 eftersom:
 
-Praktisk tolkning for v1:
+- andringsytan ar liten
+- modellen fortfarande ar overskadlig
+- framtida `Structure` kan byggas utan ny importfas
 
-- synligt analysuniversum bor vara de 12 `Is_Overview_Eligible`-serierna
-- dessa bestar av 6 huvudserier och 6 benchmarkserier
-- kategori-serierna finns i modellen men ska hallas helt dolda i v1-ytan
+### Aktiva och inaktiva relationer
 
-Verifierade relationer i datat:
+Nuvarande relationer i PBIX ska vara:
 
-- `Fact_Series_Daily.Series_ID` matchar fullt ut `Dim_Series.Series_ID`
-- `Fact_Series_Daily.Date` matchar fullt ut `Dim_Date.Date`
-- `Fact_Series_KPI.Series_ID` matchar fullt ut `Dim_Series.Series_ID`
-- `Fact_Portfolio_Alloc_Snapshot` matchar fullt ut `Dim_Portfolio`, `Dim_Series` och `Dim_Instrument`
+- aktiv: `Dim_Date[Date]` -> `Fact_Series_Daily[Date]`
+- aktiv: `Dim_Series[Series_ID]` -> `Fact_Series_Daily[Series_ID]`
+- aktiv: `Dim_Series[Series_ID]` -> `Fact_Series_KPI[Series_ID]`
+- aktiv: `Dim_Portfolio[Portfolio_Key]` -> `Dim_Series[Portfolio_Key]`
+- aktiv: `Dim_Series[Series_ID]` -> `Fact_Portfolio_Alloc_Snapshot[Series_ID]`
+- aktiv: `Dim_Instrument[Instrument_Key]` -> `Fact_Portfolio_Alloc_Snapshot[Instrument_Key]`
+- inaktiv: `Dim_Portfolio[Portfolio_Key]` -> `Fact_Portfolio_Alloc_Snapshot[Portfolio_Key]`
+- inaktiv: `Dim_Series[Yahoo_Ticker]` -> `Dim_Instrument[Yahoo_Ticker]`
 
-Verifierad datumtackning:
+Motivering:
 
-- modellens datumspann ar `2024-01-01` till `2026-03-13`
-- huvudserierna startar i praktiken `2024-01-02`
-- tva benchmarkserier startar `2024-01-05`
+- Power BI tillater inte samtidigt tva aktiva filtervagar mellan `Fact_Portfolio_Alloc_Snapshot` och `Dim_Portfolio`
+- relationen via `Dim_Series` ar den renare primarvagen
+- den direkta kopplingen mellan `Dim_Series` och `Dim_Instrument` behovs inte for v1
 
-## Rekommenderad Power BI-v1-modell
-
-### Aktiva tabeller i rapporten
-
-Tabeller som ska anvandas aktivt i `Overview` och `Performance`:
-
-- `Dim_Date`
-- `Dim_Series`
-- `Fact_Series_Daily`
-- `Fact_Series_KPI`
-
-Tabeller som kan importeras men hallas dolda i v1:
-
-- `Dim_Portfolio`
-- `Dim_Instrument`
-- `Fact_Portfolio_Alloc_Snapshot`
-
-Skal:
-
-- de senare behovs inte for synlig v1-yta
-- de kan ligga kvar for framtida `Structure` utan att storra nuvarande MVP
-
-### Rekommenderade relationer
-
-Aktiva relationer:
-
-- `Dim_Date[Date]` 1:* `Fact_Series_Daily[Date]`
-- `Dim_Series[Series_ID]` 1:* `Fact_Series_Daily[Series_ID]`
-- `Dim_Series[Series_ID]` 1:* `Fact_Series_KPI[Series_ID]`
-- `Dim_Portfolio[Portfolio_Key]` 1:* `Dim_Series[Portfolio_Key]`
-- `Dim_Portfolio[Portfolio_Key]` 1:* `Fact_Portfolio_Alloc_Snapshot[Portfolio_Key]`
-- `Dim_Series[Series_ID]` 1:* `Fact_Portfolio_Alloc_Snapshot[Series_ID]`
-- `Dim_Instrument[Instrument_Key]` 1:* `Fact_Portfolio_Alloc_Snapshot[Instrument_Key]`
-
-Rekommendation:
+Rekommenderad fortsatt princip:
 
 - enkelriktad filtrering fran dimension till fakta
 - inga dubbelriktade relationer i v1
-- undvik att bygga rapportlogik pa `Fact_Portfolio_Alloc_Snapshot` i denna fas
 
-### PBIX-lokala urvalstabeller
+## Rapportlager i PBIX
 
-For att kunna valja primarserie, benchmark och extra jamforelse oberoende av varandra bor PBIX:en ha sma frikopplade urvalstabeller.
+Det faktiska rapportlagret i PBIX bestar nu av:
 
-Rekommenderade urvalstabeller i PBIX:
+- en extra beraknad etikettkolumn i `Dim_Series`
+- fem frikopplade slicertabeller
+- en separat measure-tabell
+- tio selector-measures
+- ett KPI-lager for generiska KPI-measures
+- ett separat KPI-lager for primarseriens KPI-kort
 
-- `Sel_Primary_Portfolio`
-- `Sel_Primary_Variant`
-- `Sel_KPI_Period`
-- `Sel_Benchmark`
-- `Sel_Compare_Extra`
+Dessa objekt ar ett medvetet rapportlager ovanpa BI-datakontraktet och utgor den praktiska grunden for `Overview` och `Performance`.
 
-Dessa ska vara frikopplade, utan relationer till faktatabellerna.
+Full DAX-referens for dessa objekt dokumenteras i:
+
+- `docs/powerbi_dax_v1.md`
+
+## Beraknad kolumn i `Dim_Series`
+
+### `Series_Label`
+
+Syfte:
+
+- ge en anvandarvanlig etikett for serier i rapporten
+- skilja huvudserier, benchmark och framtida kategoriserier tydligare
+- undvika att rapportytan visar tekniska `Series_ID`
+
+Logik:
+
+- benchmarkserier visas med en rensad etikett baserad pa benchmarkidentitet
+- huvudserier visas som portfolj plus variant
+- kategoriserier visas som portfolj plus variant plus kategori
+
+Konsekvens:
+
+- v1 kan anvanda samma etikettkolumn for framtida utbyggnad
+- kategoriinformation finns redan forberedd i etiketten, utan att kategori-serier behover exponeras i v1
+
+## Frikopplade slicertabeller
+
+Samtliga slicertabeller ar frikopplade, det vill saga utan relationer till modellens fakta- eller dimensionstabeller.
 
 Skal:
 
-- en vanlig slicer pa `Dim_Series` racker inte for tre separata urvalsspar
-- benchmark ska vara fritt valbart
-- extra jamforelse ska kunna vara annan portfolj eller annan variant
+- primarserie, benchmark och extra jamforelse maste kunna valjas oberoende av varandra
+- vanlig filterpropagering via relationer racker inte for den logiken
+- selector-measures ska styra vilka serier som faktiskt visas i visuals
 
-### Rekommenderad urvalslogik
+### `Sel_Primary_Portfolio`
 
-Primarserie:
+Syfte:
 
-- valjs via `Sel_Primary_Portfolio[Portfolio_Name]`
-- valjs via `Sel_Primary_Variant[Variant]`
-- resolvas mot exakt en rad i `Dim_Series`
-- maste filtreras till `Dim_Series[Is_Main_Portfolio_Series] = TRUE`
+- styr val av primar portfolj i rapporten
+- ska representera huvudseriernas portfoljuniversum
 
-Benchmark:
+Notering:
 
-- valjs via `Sel_Benchmark`
-- maste filtreras till `Dim_Series[Is_Benchmark] = TRUE`
-- ar frivillig men bor ha en enkel default, exempelvis tom eller `BM_Global_Large`
+- tillgangliga val ska folja modellens data
 
-Extra jamforelse:
+### `Sel_Primary_Variant`
 
-- valjs via `Sel_Compare_Extra`
-- maste filtreras till `Dim_Series[Is_Overview_Eligible] = TRUE`
-- far vara annan portfolj, annan variant eller benchmark
+Syfte:
 
-Pragmatisk v1-regel:
+- styr val av primar variant for vald huvudserie
 
-- om extra jamforelse blir samma serie som primar eller benchmark ska visualen visa blank rad i stallet for dublett
+Notering:
 
-### Rekommenderade slicers
+- tillgangliga val ska folja modellens data
+- standardlaget i v1 ar `REAL`
 
-Slicers som ska finnas i v1:
+### `Sel_KPI_Period`
 
-- `Primar portfolj`
-- `Variant`
-- `KPI-period`
-- `Benchmark`
-- `Extra jamforelse`
+Syfte:
 
-Slicer som bara ska finnas pa `Performance`:
+- styr vilken materialiserad KPI-period som ska anvandas i KPI-visuals
+- ska vara logiskt separat fran datumurvalet i tidsserievisuals
 
-- `Datumintervall`
+Notering:
 
-Standardlage:
+- denna tabell har explicita sorteringsregler for periodordningen
+- standardlaget i v1 ar `1Y`
 
-- `Variant = REAL`
-- `KPI-period = 1Y`
-- `Benchmark = tom`
-- `Extra jamforelse = tom`
-- primarportfolj = en vald standard eller forsta alfabetiska
+### `Sel_Benchmark`
 
-### Hur kategori-serier halls dolda i v1
+Syfte:
 
-Kategori-serierna ska inte exponeras i nagon synlig slicer eller visual i v1.
+- styr val av fri benchmarkserie som jamforelse
 
-Rekommenderad losning:
+Notering:
 
-- bygg alla synliga urvalstabeller fran `Dim_Series` dar `Is_Overview_Eligible = TRUE`
-- lagg en sidfilterregel pa bade `Overview` och `Performance` som exkluderar `Is_Category_Series = TRUE`
-- hall `Category`-kolumnen dold i falthanteringen for v1
+- benchmark ar inte hardkopplad per portfolj
+- ingen benchmark ar forvald i v1
+- slicern ska stodja flerval
+- inget benchmarkval motsvaras av att slicern ar ovald
+- tillgangliga benchmarkval ska folja modellens data
 
-Viktig konsekvens:
+### `Sel_Compare_Extra`
 
-- `Is_Performance_Eligible` ska inte styra den synliga v1-ytan
-- den flaggan blir forst relevant nar en separat `Category`-sida byggs
+Syfte:
 
-### Praktisk etikettlogik i PBIX
+- styr val av en extra jamforelseserie utover benchmark
 
-`Dim_Series` saknar idag anvandarvanliga serienamn.
+Notering:
 
-Detta bor losas direkt i PBIX med en lokal etikettkolumn, till exempel:
+- ingen extra jamforelse ar forvald i v1
+- slicern ska stodja flerval
+- inget extra jamforelseval motsvaras av att slicern ar ovald
+- den extra jamforelsen ska valjas endast ur huvuduniversumet
+- benchmarkserier ska inte finnas i denna slicer
 
-- benchmark: rensad version av `Benchmark_ID`
-- huvudserie: `Portfolio_Name + " " + Variant`
-- kategori: inte synlig i v1
+## Measure-tabell
 
-Detta ar ett rapportlagerproblem, inte ett blockerande BI-sporsgap.
+En separat tabell har skapats for measures.
 
-## Sida: Overview
+Nuvarande tabell:
 
-| Visual | Syfte | Datakalla | Filterpaverkan | Risk / workaround |
-| --- | --- | --- | --- | --- |
-| Slicerband overst | Samla primarurval och jamforelser pa en plats | PBIX-lokala urvalstabeller | `Primar portfolj`, `Variant`, `KPI-period`, `Benchmark`, `Extra jamforelse` styr alla Overview-visuals | Frikopplade slicers kravs; los med selektionsmeasures i stallet for direkta relationer |
-| KPI-kort for primarserie | Snabb statusbild for vald huvudserie | `Fact_Series_KPI` via `Dim_Series` | Styrs av primarserie och `KPI-period`, men inte av datumslider | Kort maste peka pa exakt en serie; visa blankt om primarvalet inte resolvas entydigt |
-| Jamforelsetabell med 3 rader | Jamfor primar, benchmark och extra serie i samma period | `Fact_Series_KPI` via `Dim_Series` | Styrs av primarserie, benchmark, extra jamforelse och `KPI-period` | Dubbletter kan uppsta om samma serie valjs flera ganger; visa blank rad for dublett |
-| Data freshness-kort | Visa senaste datadag och ge tillit till rapporten | `Fact_Series_Daily` eller `Dim_Date` | Oberoende av `KPI-period`, bor inte styras av datumslider | Ingen sarskild risk; anvand maxdatum i modellen |
+- `Measure_Hub`
 
-Rekommenderade KPI-kort:
+Syfte:
 
-- `Return_Total`
-- `CAGR`
-- `Vol`
-- `Sharpe`
-- `Max_DD`
-- `Calmar`
+- samla rapportens DAX-measures pa en tydlig plats
+- undvika att selector-measures sprids over modellens dimensioner och fakta
 
-Rekommenderade kolumner i jamforelsetabellen:
+## Faktiskt skapade selector-measures
 
-- `Series_Label`
-- `Return_Total`
-- `CAGR`
-- `Vol`
-- `Sharpe`
-- `Sortino`
-- `Max_DD`
-- `Calmar`
+Foljande tio measures ar skapade i PBIX och testade.
 
-Pragmatisk layoutsammanfattning:
+### Grundurval
 
-- overst: slicerband
-- mitten: 6 KPI-kort for primarserien
-- nederst: en jamforelsetabell
-- liten statusyta till hoger med senaste datadatum
+#### `Selected Primary Portfolio`
 
-## Sida: Performance
+Syfte:
 
-| Visual | Syfte | Datakalla | Filterpaverkan | Risk / workaround |
-| --- | --- | --- | --- | --- |
-| Slicerband overst | Ateranvand samma urvalslogik som pa `Overview` | PBIX-lokala urvalstabeller | Styr bada linjediagrammen och KPI-tabellen | Hall samma standardval som pa `Overview` for konsekvens |
-| Datumslider | Styra bara tidsserievisuals | `Dim_Date` -> `Fact_Series_Daily` | Ska bara paverka index- och drawdowndiagram | Anvand `Edit interactions` sa att den inte filtrerar KPI-tabellen |
-| Linjediagram: Indexutveckling | Visa primarserie mot benchmark och extra jamforelse over tid | `Fact_Series_Daily[IDX]` via `Dim_Series` | Styrs av primarserie, benchmark, extra jamforelse och datumslider | Serierna startar inte exakt samma dag; lat visualen visa naturliga blanks fore forsta observation |
-| Linjediagram: Drawdown | Visa riskbanan for samma tre serier | `Fact_Series_Daily[DD]` via `Dim_Series` | Samma filter som indexdiagrammet | Samma issue med olika startdatum; samma workaround |
-| KPI-tabell for vald period | Ge snabb avlasning under diagrammen utan att blanda in datumslider | `Fact_Series_KPI` via `Dim_Series` | Styrs av primarserie, benchmark, extra jamforelse och `KPI-period`, men inte av datumslider | Kraver tydlig etikett i rubrik, till exempel `KPI-period: 1Y` |
+- lasar valt primarportfoljurval fran slicern
 
-Rekommenderade kolumner i KPI-tabellen:
+#### `Selected Primary Variant`
 
-- `Series_Label`
-- `Return_Total`
-- `CAGR`
-- `Vol`
-- `Sharpe`
-- `Max_DD`
+Syfte:
 
-Pragmatisk layoutsammanfattning:
+- lasar vald primarvariant fran slicern
+- hanterar standardlage for variant
 
-- overst: slicerband plus datumslider
-- mitten: stort indexdiagram
-- under: drawdowndiagram
-- nederst: kompakt KPI-tabell for vald period
+#### `Selected KPI Period`
 
-## Vad som ingar nu
+Syfte:
 
-Ingaar i Power BI-v1:
+- lasar vald KPI-period fran slicern
+- hanterar standardlage for KPI-period
 
-- import av befintligt `portfolio_bi_data.xlsx`
-- liten och stabil modell for `Overview` och `Performance`
-- separat val av primarserie, benchmark och extra jamforelse
-- standardvariant `REAL`
-- separat `KPI-period`
-- datumslider endast pa tidsserievisuals i `Performance`
-- kategori-serier dolda i all synlig yta
+#### `Selected Benchmark Series ID`
 
-## Vad som skjuts till senare
+Syfte:
 
-Skjuts till senare:
+- lasar vald benchmarkseries tekniska ID
+- returnerar entydigt ID endast nar exakt ett benchmark ar valt
+- returnerar blankt nar inget benchmark ar valt eller nar flera benchmark ar valda
 
-- faktisk `Structure`-sida
-- faktisk `Category`-sida
-- fler an en extra jamforelseserie
-- hardkopplad benchmark per portfolj
-- avancerad DAX-logik for KPI:er
-- korrelation, scatter, drillthrough eller annan v2-analys
+#### `Selected Extra Series ID`
+
+Syfte:
+
+- lasar vald extra jamforelseseries tekniska ID
+- returnerar entydigt ID endast nar exakt en extra jamforelse ar vald
+- returnerar blankt nar ingen extra jamforelse ar vald eller nar flera extra jamforelser ar valda
+
+### Resolvering av primarserie
+
+#### `Selected Primary Series ID`
+
+Syfte:
+
+- oversatter kombinationen primar portfolj plus variant till exakt en huvudserie i `Dim_Series`
+- ar den centrala resolveringen for primarlogiken i rapporten
+
+Viktig regel:
+
+- resolveringen ska ske endast mot huvudserier
+- kategori-serier ska inte kunna bli primarserie i v1
+
+### Visuellt urval
+
+#### `Is Selected Overview Series`
+
+Syfte:
+
+- markerar om en viss serie ska visas i ett v1-visual
+- styr de serier som far inga i `Overview` och `Performance`
+
+Nuvarande avsedd logik:
+
+- primarserie inkluderas alltid
+- alla valda benchmark inkluderas om benchmark slicern har urval
+- alla valda extra jamforelser inkluderas om extra slicern har urval
+
+Praktisk effekt:
+
+- samma visual kan begransas till exakt de serier som rapportens slicerlogik avser
+
+#### `Overview Series Sort Rank`
+
+Syfte:
+
+- ger en dynamisk sortgrupp for jamforelsetabellen pa `Overview`
+
+Avsedd logik:
+
+- primarserie sorteras forst
+- valda extra jamforelser sorteras darrefter
+- valda benchmark sorteras sist
+
+Praktisk notering:
+
+- denna measure anvands som teknisk sorteringskolumn i tabellvisualen
+- losningen valdes eftersom ordningen beror pa aktuella slicerval och darfor inte kan styras stabilt med en statisk modellkolumn
+
+### Etiketter for kontroll och felsokning
+
+#### `Selected Primary Label`
+
+Syfte:
+
+- visar anvandarvanlig etikett for resolverad primarserie
+
+#### `Selected Benchmark Label`
+
+Syfte:
+
+- visar anvandarvanliga etiketter for valda benchmark
+- visar ett tydligt textlage nar ingen benchmark ar vald
+
+#### `Selected Extra Label`
+
+Syfte:
+
+- visar anvandarvanliga etiketter for valda extra jamforelser
+- visar ett tydligt textlage nar ingen extra jamforelse ar vald
+
+## KPI-lager i DAX
+
+Utifran det byggda rapportlagret finns nu tva nivaer av KPI-measures i PBIX-arbetet:
+
+- generiska KPI-measures som fungerar i tabeller och annan radkontext
+- `Primary KPI`-measures som alltid ska folja primarserien i KPI-korten
+
+Syfte med uppdelningen:
+
+- undvika att klick i jamforelsetabeller skriver over kortens primarlogik
+- kunna ateranvanda samma KPI-grund i flera visuals
+
+Dokumenterade DAX-definitioner for detta lager finns i:
+
+- `docs/powerbi_dax_v1.md`
+
+## Faktisk filtermodell for v1-ytan
+
+V1-ytan bygger nu pa tva lager:
+
+1. modellrelationer for grundlaggande fakta-dimension-koppling
+2. selector-measures for att styra vilka serier som faktiskt ska visas
+
+Detta innebar:
+
+- slicertabellerna filtrerar inte faktat direkt via relationer
+- visuals maste i stallet anvanda selector-measures som visualfilter eller i motsvarande measurelogik
+- kategori-serier kan hallas dolda trots att de finns i modellen
+
+## Faktisk sidlogik for v1
+
+### `Overview`
+
+Syfte:
+
+- ge en snabb beslutsmassig oversikt for vald primarserie
+- mojliggora fri jamforelse mot benchmark och en extra serie
+
+Avsedd filterlogik:
+
+- styrs av primar portfolj
+- styrs av variant
+- styrs av KPI-period
+- styrs av benchmark
+- styrs av extra jamforelse
+
+Viktig regel:
+
+- ingen datumstyrning ska paverka KPI-ytan pa `Overview`
+- KPI-korten for primarserien ska fortsatt styras av `Primary KPI`-measures och inte skrivas over av klick i jamforelsetabellen
+
+### `Performance`
+
+Syfte:
+
+- visa tidsserieutveckling for primarserie och valda jamforelseserier
+
+Avsedd filterlogik:
+
+- samma serieurval som pa `Overview`
+- separat datumurval endast for tidsserievisuals
+
+Notering:
+
+- datumslicer for `Performance` ar identifierad som del av v1 men ar annu inte tillagd i den faktiska rapporten
+
+## Avstamning mot tidigare specifikation
+
+Foljande delar fran tidigare specifikation galler fortfarande:
+
+- `Overview` och `Performance` ar fortsatt enda sidor i v1-scope
+- KPI:er ska fortsatt lasas fran `Fact_Series_KPI`
+- tidsserier ska fortsatt lasas fran `Fact_Series_Daily`
+- benchmark ska fortsatt vara ett fritt val
+- kategori-serier ska fortsatt vara dolda i v1-ytan
+- KPI-period ska fortsatt vara separat fran datumurval
+
+Foljande delar har konkretiserats eller justerats under PBIX-arbetet:
+
+- alla tabeller ar importerade i PBIX, inte bara de som anvands synligt i v1
+- en faktisk rapportetikettkolumn har lagts till i `Dim_Series`
+- faktiska frikopplade slicertabeller har skapats
+- faktisk measure-tabell har skapats
+- faktiskt paket av selector-measures har skapats och testats
+- relationsmodellen har justerats till vad Power BI faktiskt tillater, med tva inaktiva relationer i stallet for att forsoka ha bada aktiva
 
 ## Kritiska gap
 
-### Rapportgap som kan losas i Power BI direkt
+Inga blockerande datamodellgap ar identifierade for att fardigstalla `Overview` och `Performance` i v1.
 
-- `Dim_Series` saknar anvandarvanlig etikettkolumn
-- frikopplade urvalstabeller behovs for tre separata urvalsspar
-- datumslider maste explicit avgransas med `Edit interactions`
+Foljande kvarvarande gap ligger i rapportlagret, inte i BI-sparet:
 
-Dessa gap kraver ingen andring i BI-sparet.
-
-### Datamodellgap som faktiskt kraver andring i BI-sparet
-
-Inga blockerande datamodellgap ar identifierade for just `Overview` och `Performance` v1.
+- slutlig validering av KPI-lagret i visuals
+- tidsseriemeasures eller visuallogik for `IDX` och `DD`
+- datumslicer pa `Performance`
+- faktisk layout och visualbyggnation for sidorna
+- eventuell synkronisering av slicers mellan `Overview` och `Performance`
 
 Foljdnotering for senare faser:
 
-- `Dim_Instrument` har i nulaget tomma falt for `Instrument_Type`, `Category` och `Structure`
-- det ar inte blockerande nu, men blir relevant nar `Structure` eller framtida kategorimodell ska byggas
+- `Dim_Instrument` ar fortfarande tunn och blir forst relevant nar `Structure` ska byggas
 
-## Rekommenderat nasta steg
+## Aterstaende arbete
 
-1. Skapa en ny PBIX som laser `data/portfolio_bi_data.xlsx`.
-2. Satt relationerna enligt denna spec.
-3. Skapa de fem frikopplade urvalstabellerna i PBIX.
-4. Bygg `Overview` och `Performance` med exakt urvalslogik ovan.
-5. Lasa standardlaget till `REAL`, `1Y` och tom benchmark/extra jamforelse via bookmark eller sparad rapportsession.
-6. Validera med minst dessa urval:
-   - `EGEN` + `REAL`
-   - benchmark `BM_Global_Large`
-   - extra jamforelse `PA REAL`
-   - `KPI-period = 1Y`
+For att stanga Power BI-v1 aterstar i huvudsak foljande:
 
-Om detta fungerar behovs ingen andring i upstream eller BI-sparet for att leverera en forsta Power BI-MVP.
+### 1. Slutlig validering av KPI-lagret
+
+Det finns nu en dokumenterad DAX-bas for:
+
+- generiska KPI-measures
+- `Primary KPI`-measures for korten
+
+Det som aterstar ar att sakerstalla att de anvands konsekvent i visuals:
+
+- kort ska anvanda `Primary KPI`
+- jamforelsetabeller ska anvanda generiska `KPI`
+- oonskade visualinteraktioner ska vara avstangda dar det behovs
+
+### 2. Tidsserievisuals for `Performance`
+
+Behovs for att visa:
+
+- indexutveckling baserad pa `Fact_Series_Daily[IDX]`
+- drawdown baserad pa `Fact_Series_Daily[DD]`
+
+Minimikrav i v1:
+
+- visuals som endast visar valda serier
+- selector-logiken ska begransa serieurvalet
+
+### 3. Datumslicer pa `Performance`
+
+Behovs for att uppfylla last beslut om tidsstyrning.
+
+Regel:
+
+- datumslicern ska bara styra tidsserievisuals pa `Performance`
+- den ska inte styra KPI-period eller KPI-tabeller
+
+Detta krav ar identifierat men inte annu implementerat.
+
+### 4. Faktisk sidlayout
+
+Behovs for att fa en komplett v1-rapport:
+
+- `Overview` med slicers, KPI-kort och jamforelsetabell
+- `Performance` med slicers, datumslicer, indexgraf, drawdowngraf och KPI-tabell
+
+### 5. Slutlig validering
+
+Behovs innan v1 kan betraktas som klar:
+
+- verifiera att primarserie resolveras korrekt
+- verifiera att benchmark kan vara inget val, ett val eller flera val
+- verifiera att extra jamforelse kan vara inget val, ett val eller flera val
+- verifiera att samma serie inte visas dubbelt i visuals nar valen overlappar
+- verifiera att jamforelsetabellen sorterar primarserie fore extra jamforelse och benchmark
+- verifiera att datumslicern endast paverkar tidsserievisuals pa `Performance`
+
+## Sammanfattning
+
+Power BI-v1 har nu en faktisk och fungerande grund:
+
+- datamodellen ar etablerad
+- rapportlagret med etikettkolumn, slicertabeller och selector-measures ar pa plats
+- relationerna ar justerade efter vad Power BI faktiskt tillater
+
+Det som aterstar for att stanga v1 ar framst visual- och measurelagret, inte nya upstream- eller BI-sporsandringar.
