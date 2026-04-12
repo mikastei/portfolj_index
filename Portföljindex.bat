@@ -58,6 +58,33 @@ REM Kor BI_prep
 echo Running: py -m src.bi_prep>> "%LOG_FILE%"
 py -m src.bi_prep >> "%LOG_FILE%" 2>&1
 set "ERR=%ERRORLEVEL%"
+if not "%ERR%"=="0" goto :finish
+
+REM Best-effort: oppna och spara BI-workbooken i riktig Excel for att minska
+REM kompatibilitetsproblem vid direkt uppdatering i Power BI efter Python-export.
+if exist "data\portfolio_bi_data.xlsx" (
+  echo Running: normalize data\portfolio_bi_data.xlsx via Excel COM>> "%LOG_FILE%"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$path = Join-Path (Get-Location) 'data\portfolio_bi_data.xlsx';" ^
+    "$excel = $null; $workbook = $null;" ^
+    "try {" ^
+    "  $excel = New-Object -ComObject Excel.Application;" ^
+    "  $excel.Visible = $false;" ^
+    "  $excel.DisplayAlerts = $false;" ^
+    "  $workbook = $excel.Workbooks.Open($path);" ^
+    "  $workbook.Save();" ^
+    "  $workbook.Close($false);" ^
+    "  Write-Output 'BI workbook normalized via Excel COM';" ^
+    "} catch {" ^
+    "  Write-Output ('WARNING: BI workbook normalization skipped: ' + $_.Exception.Message);" ^
+    "} finally {" ^
+    "  if ($workbook -ne $null) { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) }" ^
+    "  if ($excel -ne $null) {" ^
+    "    $excel.Quit();" ^
+    "    [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel)" ^
+    "  }" ^
+    "}" >> "%LOG_FILE%" 2>&1
+)
 
 :finish
 REM Avaktivera venv om deactivate finns
@@ -65,10 +92,16 @@ if defined VIRTUAL_ENV if exist ".venv\Scripts\deactivate.bat" (
   call ".venv\Scripts\deactivate.bat" >> "%LOG_FILE%" 2>&1
 )
 
+set "STATUS=FAILED"
+if "%ERR%"=="0" set "STATUS=SUCCESS"
+
 >> "%LOG_FILE%" echo ============================================================
 >> "%LOG_FILE%" echo End: %date% %time%
+>> "%LOG_FILE%" echo Status: %STATUS%
 >> "%LOG_FILE%" echo Result code: %ERR%
 >> "%LOG_FILE%" echo Log: %LOG_FILE%
 >> "%LOG_FILE%" echo ============================================================
+
+start "" notepad "%LOG_FILE%"
 
 exit /b %ERR%

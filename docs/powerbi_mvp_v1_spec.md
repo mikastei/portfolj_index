@@ -396,14 +396,22 @@ Syfte:
 
 - visa tidsserieutveckling for primarserie och valda jamforelseserier
 
-Avsedd filterlogik:
+Faktisk filterlogik i v1:
 
 - samma serieurval som pa `Overview`
 - separat datumurval endast for tidsserievisuals
 
-Notering:
+Faktiskt byggt i PBIX:
 
-- datumslicer for `Performance` ar identifierad som del av v1 men ar annu inte tillagd i den faktiska rapporten
+- en lokal datumslicer pa `Dim_Date[Date]` i `Between`-lage
+- ett linjediagram for `IDX`
+- ett linjediagram for `DD`
+- bada visualerna anvander `Dim_Date[Date]` pa axeln
+- bada visualerna anvander `Dim_Series[Series_Label]` som legend
+- bada visualerna anvander `Fact_Series_Daily[IDX]` respektive `Fact_Series_Daily[DD]` som varde
+- bada visualerna ar begransade med visualfiltret `Is Selected Overview Series = 1`
+- inga nya selector-measures eller andra nya DAX-measures har lagts till specifikt for `Performance`
+- ingen KPI-tabell eller KPI-kort finns pa `Performance` i v1
 
 ## Avstamning mot tidigare specifikation
 
@@ -427,15 +435,15 @@ Foljande delar har konkretiserats eller justerats under PBIX-arbetet:
 
 ## Kritiska gap
 
-Inga blockerande datamodellgap ar identifierade for att fardigstalla `Overview` och `Performance` i v1.
+Inga blockerande datamodellgap ar identifierade for `Overview` och `Performance` i v1.
 
-Foljande kvarvarande gap ligger i rapportlagret, inte i BI-sparet:
+Foljande rapportdelar ar nu implementerade och manuellt verifierade:
 
-- slutlig validering av KPI-lagret i visuals
-- tidsseriemeasures eller visuallogik for `IDX` och `DD`
-- datumslicer pa `Performance`
-- faktisk layout och visualbyggnation for sidorna
-- eventuell synkronisering av slicers mellan `Overview` och `Performance`
+- `Overview` ar byggd och verifierad enligt aktuell v1-logik
+- `Performance` har tidsserievisuals for `IDX` och `DD`
+- `Performance` har lokal datumstyrning for tidsserievisuals
+- samma selector-logik ateranvands pa `Overview` och `Performance`
+- inga andringar har behovt goras i BI-datakontraktet for att stanga `Performance`
 
 Foljdnotering for senare faser:
 
@@ -443,61 +451,17 @@ Foljdnotering for senare faser:
 
 ## Aterstaende arbete
 
-For att stanga Power BI-v1 aterstar i huvudsak foljande:
+Utifran nuvarande repo-dokumentation och manuellt verifierat PBIX-lage framstar Power BI-v1 som funktionellt klar.
 
-### 1. Slutlig validering av KPI-lagret
+Det som ar verifierat i rapportlagret ar:
 
-Det finns nu en dokumenterad DAX-bas for:
+- `Overview` ansvarar for KPI-kort och jamforelsetabell
+- `Performance` ansvarar for tidsserievisualisering via `IDX` och `DD`
+- `Performance` ateranvander samma selector-logik som `Overview`
+- datumslicern pa `Performance` paverkar tidsserievisuals och inte KPI-ytan pa `Overview`
+- ingen KPI-tabell finns pa `Performance` i v1, for att undvika att blanda KPI-period med fri datumstyrning
 
-- generiska KPI-measures
-- `Primary KPI`-measures for korten
-
-Det som aterstar ar att sakerstalla att de anvands konsekvent i visuals:
-
-- kort ska anvanda `Primary KPI`
-- jamforelsetabeller ska anvanda generiska `KPI`
-- oonskade visualinteraktioner ska vara avstangda dar det behovs
-
-### 2. Tidsserievisuals for `Performance`
-
-Behovs for att visa:
-
-- indexutveckling baserad pa `Fact_Series_Daily[IDX]`
-- drawdown baserad pa `Fact_Series_Daily[DD]`
-
-Minimikrav i v1:
-
-- visuals som endast visar valda serier
-- selector-logiken ska begransa serieurvalet
-
-### 3. Datumslicer pa `Performance`
-
-Behovs for att uppfylla last beslut om tidsstyrning.
-
-Regel:
-
-- datumslicern ska bara styra tidsserievisuals pa `Performance`
-- den ska inte styra KPI-period eller KPI-tabeller
-
-Detta krav ar identifierat men inte annu implementerat.
-
-### 4. Faktisk sidlayout
-
-Behovs for att fa en komplett v1-rapport:
-
-- `Overview` med slicers, KPI-kort och jamforelsetabell
-- `Performance` med slicers, datumslicer, indexgraf, drawdowngraf och KPI-tabell
-
-### 5. Slutlig validering
-
-Behovs innan v1 kan betraktas som klar:
-
-- verifiera att primarserie resolveras korrekt
-- verifiera att benchmark kan vara inget val, ett val eller flera val
-- verifiera att extra jamforelse kan vara inget val, ett val eller flera val
-- verifiera att samma serie inte visas dubbelt i visuals nar valen overlappar
-- verifiera att jamforelsetabellen sorterar primarserie fore extra jamforelse och benchmark
-- verifiera att datumslicern endast paverkar tidsserievisuals pa `Performance`
+Kvarvarande arbete ligger darfor inte langre i definierad v1-scope, utan i eventuell slutlig produktbedomning eller senare utbyggnad.
 
 ## Sammanfattning
 
@@ -507,4 +471,9 @@ Power BI-v1 har nu en faktisk och fungerande grund:
 - rapportlagret med etikettkolumn, slicertabeller och selector-measures ar pa plats
 - relationerna ar justerade efter vad Power BI faktiskt tillater
 
-Det som aterstar for att stanga v1 ar framst visual- och measurelagret, inte nya upstream- eller BI-sporsandringar.
+Den faktiska v1-losningen ar nu dokumenterad som en liten och stabil rapport med:
+
+- `Overview` for KPI-kort och jamforelsetabell
+- `Performance` for datumstyrda tidsserievisuals
+- gemensam selector-logik for serieurval
+- ingen ytterligare DAX-utbyggnad specifikt for `Performance`

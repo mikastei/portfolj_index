@@ -7,6 +7,9 @@ import logging
 from pathlib import Path
 
 import pandas as pd
+from openpyxl.styles import PatternFill
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from . import config
 from .bi_io import extract_run_parameters, load_portfolio_output
@@ -14,6 +17,7 @@ from .bi_metrics import PERIOD_ORDER, compute_kpis, has_minimum_observations, sl
 
 ANALYSIS_PREFIXES = ("PORT_", "BM_")
 ALLOCATION_SNAPSHOT_SHEET_NAME = "Fact_Portfolio_Alloc_Snapshot"
+TABLE_HEADER_FILL = PatternFill(fill_type="solid", fgColor="D9EAF7")
 
 
 def _configure_logging() -> None:
@@ -363,6 +367,28 @@ def _build_fact_portfolio_allocation_snapshot(
     ].sort_values(["Portfolio_Key", "Series_ID", "Instrument_Key"]).reset_index(drop=True)
 
 
+def _add_excel_table(writer: pd.ExcelWriter, sheet_name: str, table_name: str) -> None:
+    """Wrap a worksheet's used range in an Excel table for more stable Power BI navigation."""
+    worksheet = writer.sheets[sheet_name]
+    if worksheet.max_row < 1 or worksheet.max_column < 1:
+        return
+
+    table_ref = f"A1:{get_column_letter(worksheet.max_column)}{worksheet.max_row}"
+    table = Table(displayName=table_name, ref=table_ref)
+    table.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium2",
+        showFirstColumn=False,
+        showLastColumn=False,
+        showRowStripes=False,
+        showColumnStripes=False,
+    )
+    worksheet.add_table(table)
+
+    # Keep header fill deterministic instead of relying only on the table style theme.
+    for cell in worksheet[1]:
+        cell.fill = TABLE_HEADER_FILL
+
+
 def run(
     source_output_path: str | Path | None = None,
     bi_output_path: str | Path | None = None,
@@ -422,6 +448,17 @@ def run(
             writer,
             sheet_name=ALLOCATION_SNAPSHOT_SHEET_NAME,
             index=False,
+        )
+        _add_excel_table(writer, "Dim_Date", "Dim_Date")
+        _add_excel_table(writer, "Dim_Portfolio", "Dim_Portfolio")
+        _add_excel_table(writer, "Dim_Series", "Dim_Series")
+        _add_excel_table(writer, "Dim_Instrument", "Dim_Instrument")
+        _add_excel_table(writer, "Fact_Series_Daily", "Fact_Series_Daily")
+        _add_excel_table(writer, "Fact_Series_KPI", "Fact_Series_KPI")
+        _add_excel_table(
+            writer,
+            ALLOCATION_SNAPSHOT_SHEET_NAME,
+            ALLOCATION_SNAPSHOT_SHEET_NAME,
         )
 
     logging.info("BI data workbook written: %s", output_path)
