@@ -37,6 +37,9 @@ Viktiga regler:
 - `SALJ` = positivt belopp
 - varje ISIN i `Transactions` maste finnas i `Mapping`
 - varje ISIN i `Transactions` maste ha en giltig `Category` i `Mapping`
+- for `REAL`-serier anvands `Affarsdag` som transaktionsdatum
+- om `Affarsdag` saknar rad i pris-/varderingsindex mappas transaktionen till nasta tillgangliga varderingsdag
+- samma effektiva datum anvands for bade positionsuppdatering och cashflow i `REAL` for att undvika datumglapp
 
 Output:
 
@@ -188,4 +191,4 @@ Fel tecken kan skapa stora hopp i indexserierna.
 
 ---
 
-Senast uppdaterad: 2026-04-07
+Senast uppdaterad: 2026-04-12

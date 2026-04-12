@@ -22,6 +22,7 @@ COL_VALUTA = "Valuta"
 COL_REFX = "Referensvalutakurs"
 COL_VAX = "V\u00e4xlingskurs"
 COL_PRICE_CCY = "Price_Currency"
+COL_EFFECTIVE_DATE = "_Effective_Date"
 
 logger = logging.getLogger(__name__)
 DEBUG_ENABLED = os.getenv("PORTFOLIO_DEBUG") == "1"
@@ -453,6 +454,28 @@ def _txn_sign(v: object) -> float:
     return 0.0
 
 
+def _align_to_price_calendar(tx_dates: pd.Series, price_index: pd.Index) -> pd.Series:
+    dates = pd.to_datetime(tx_dates, errors="coerce")
+    aligned = pd.Series(pd.NaT, index=dates.index, dtype="datetime64[ns]")
+    if dates.empty:
+        return aligned
+
+    calendar = pd.DatetimeIndex(price_index).sort_values().unique()
+    if calendar.empty:
+        return aligned
+
+    valid_dates = dates.dropna()
+    if valid_dates.empty:
+        return aligned
+
+    positions = calendar.searchsorted(valid_dates.to_numpy())
+    in_range = positions < len(calendar)
+    if in_range.any():
+        matched_index = valid_dates.index[in_range]
+        aligned.loc[matched_index] = calendar.take(positions[in_range]).to_numpy()
+    return aligned
+
+
 def _real_position_state(
     transactions: pd.DataFrame,
     mapping: pd.DataFrame,
@@ -468,6 +491,7 @@ def _real_position_state(
     tx["Transaktionstyp"] = tx["Transaktionstyp"].astype(str).str.strip().str.upper()
     tx["txn_sign"] = tx["Transaktionstyp"].map(_txn_sign).astype(float)
     tx["signed_qty"] = tx["Antal"] * tx["txn_sign"]
+    tx[COL_EFFECTIVE_DATE] = _align_to_price_calendar(tx[COL_AFFARSDAG], prices.index)
     unknown_types = sorted(tx.loc[tx["txn_sign"] == 0, "Transaktionstyp"].dropna().unique())
     if unknown_types:
         logger.warning("Unknown transaction types treated as 0-sign: %s", unknown_types)
@@ -488,9 +512,10 @@ def _real_position_state(
         raise ValueError(f"Missing Mapping for ISIN(s): {missing}")
 
     flows_isin = (
-        tx.groupby([COL_AFFARSDAG, "ISIN"], as_index=False)["signed_qty"]
+        tx.dropna(subset=[COL_EFFECTIVE_DATE])
+        .groupby([COL_EFFECTIVE_DATE, "ISIN"], as_index=False)["signed_qty"]
         .sum()
-        .pivot(index=COL_AFFARSDAG, columns="ISIN", values="signed_qty")
+        .pivot(index=COL_EFFECTIVE_DATE, columns="ISIN", values="signed_qty")
         .fillna(0.0)
         .sort_index()
     )
@@ -673,8 +698,8 @@ def _real_portfolio_returns(
         )
         tx_belopp_base = pd.to_numeric(belopp_base, errors="coerce").fillna(0.0).astype(float)
 
-        belopp_sum_raw = belopp.groupby(tx[COL_AFFARSDAG]).sum().reindex(values.index).fillna(0.0)
-        belopp_sum = tx_belopp_base.groupby(tx[COL_AFFARSDAG]).sum().reindex(values.index).fillna(0.0)
+        belopp_sum_raw = belopp.groupby(tx[COL_EFFECTIVE_DATE]).sum().reindex(values.index).fillna(0.0)
+        belopp_sum = tx_belopp_base.groupby(tx[COL_EFFECTIVE_DATE]).sum().reindex(values.index).fillna(0.0)
         cashflow = -belopp_sum
     else:
         belopp_sum_raw = pd.Series(0.0, index=values.index)
@@ -723,7 +748,7 @@ def _real_portfolio_returns(
             for i in held_isins
             if i in price_base_df.columns and pd.isna(price_base_df.loc[date, i]) and i in isin_to_ticker.index
         ]
-        day_mask = tx[COL_AFFARSDAG].dt.normalize() == pd.Timestamp(date).normalize()
+        day_mask = tx[COL_EFFECTIVE_DATE].dt.normalize() == pd.Timestamp(date).normalize()
         tx_day = tx.loc[day_mask].copy()
         if not tx_day.empty:
             tx_day["belopp_base"] = tx_belopp_base.loc[tx_day.index].astype(float)
@@ -744,7 +769,7 @@ def _real_portfolio_returns(
             if c in tx_day.columns:
                 portfolio_col = c
                 break
-        detail_cols = [COL_AFFARSDAG, "Transaktionstyp", "ISIN", "Antal", COL_BELOPP, COL_VALUTA]
+        detail_cols = [COL_EFFECTIVE_DATE, COL_AFFARSDAG, "Transaktionstyp", "ISIN", "Antal", COL_BELOPP, COL_VALUTA]
         if portfolio_col:
             detail_cols.insert(1, portfolio_col)
         rate_col = COL_REFX if COL_REFX in tx_day.columns else (COL_VAX if COL_VAX in tx_day.columns else None)

@@ -295,3 +295,84 @@ def test_build_portfolio_series_map_includes_real_snapshot_from_transactions(bas
     assert real_rows["Yahoo_Ticker"].tolist() == ["AAA"]
     assert real_rows["Weight_Source"].tolist() == ["REAL"]
     assert real_rows["Weight"].iloc[0] == pytest.approx(1.0)
+
+
+def test_real_total_aligns_weekend_trade_to_next_price_day_not_bokforingsdag():
+    portfolio_metadata = pd.DataFrame(
+        [
+            {
+                "Portfolio_Name": "PA",
+                "Index_Start_Date": pd.Timestamp("2024-01-05"),
+                "Initial_Index_Value": 100.0,
+            }
+        ]
+    )
+    benchmarks = pd.DataFrame(columns=["Benchmark_ID", "Yahoo_Ticker", "Include_From_Date"])
+    fondertabell = pd.DataFrame(
+        [
+            {COL_PORTFOLJ: "PA", "Yahoo": "AAA", "Andel": 1.0, "AndelP": 1.0},
+        ]
+    )
+    mapping = pd.DataFrame(
+        [
+            {"ISIN": "SE0001", "Yahoo_Ticker": "AAA", "Instrument_Type": "Fund", "Price_Currency": "SEK", "Category": RATE_CATEGORY},
+            {"ISIN": "SE0002", "Yahoo_Ticker": "BBB", "Instrument_Type": "Fund", "Price_Currency": "SEK", "Category": RATE_CATEGORY},
+        ]
+    )
+    prices = pd.DataFrame(
+        {
+            "AAA": [100.0, 100.0, 100.0, 100.0],
+            "BBB": [100.0, 100.0, 100.0, 100.0],
+        },
+        index=pd.to_datetime(["2024-01-05", "2024-01-08", "2024-01-09", "2024-01-10"]),
+    )
+    transactions = pd.DataFrame(
+        [
+            {
+                "Portfolio_Name": "PA",
+                COL_AFFARSDAG: pd.Timestamp("2024-01-05"),
+                "Bokföringsdag": pd.Timestamp("2024-01-08"),
+                "ISIN": "SE0001",
+                "Antal": 10.0,
+                "Transaktionstyp": BUY,
+                "Belopp": -1000.0,
+                "Valuta": "SEK",
+            },
+            {
+                "Portfolio_Name": "PA",
+                COL_AFFARSDAG: pd.Timestamp("2024-01-06"),
+                "Bokföringsdag": pd.Timestamp("2024-01-09"),
+                "ISIN": "SE0001",
+                "Antal": 10.0,
+                "Transaktionstyp": SELL,
+                "Belopp": 1000.0,
+                "Valuta": "SEK",
+            },
+            {
+                "Portfolio_Name": "PA",
+                COL_AFFARSDAG: pd.Timestamp("2024-01-09"),
+                "Bokföringsdag": pd.Timestamp("2024-01-10"),
+                "ISIN": "SE0002",
+                "Antal": 10.0,
+                "Transaktionstyp": BUY,
+                "Belopp": -1000.0,
+                "Valuta": "SEK",
+            },
+        ]
+    )
+    inputs = EngineInputs(
+        transactions=transactions,
+        mapping=mapping,
+        portfolio_metadata=portfolio_metadata,
+        benchmarks=benchmarks,
+        fondertabell=fondertabell,
+        prices=prices,
+        base_currency="SEK",
+    )
+
+    series_map = build_portfolios_and_benchmarks(inputs)
+    total_series = series_map["PORT_PA_REAL"]
+
+    assert total_series.loc[pd.Timestamp("2024-01-08"), "RET"] == pytest.approx(0.0)
+    assert total_series.loc[pd.Timestamp("2024-01-09"), "RET"] == pytest.approx(0.0)
+    assert total_series.loc[pd.Timestamp("2024-01-10"), "RET"] == pytest.approx(0.0)

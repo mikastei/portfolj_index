@@ -98,6 +98,12 @@ Workbooken skrivs med bladen:
 - `Master_TimeSeries_Long`
 - `Run_Config`
 
+Datumhantering for `REAL`:
+
+- `Affarsdag` ar grunddatum for transaktioner i `REAL`
+- om `Affarsdag` saknar rad i pris-/varderingsindex flyttas transaktionen till nasta tillgangliga varderingsdag
+- samma effektiva datum anvands for bade positionsuppdatering och cashflow i `REAL` for att undvika att innehav och kassafloden hamnar ur synk
+
 Seriekonventioner:
 
 - `PORT_{slug(portfolio_name)}_{REAL|CUR|TGT}`
@@ -186,4 +192,4 @@ BI-sparet kan kors separat via:
 
 ---
 
-Senast uppdaterad: 2026-04-07
+Senast uppdaterad: 2026-04-12
