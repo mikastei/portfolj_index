@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 
 import pandas as pd
 
@@ -16,7 +17,7 @@ def _configure_logging() -> None:
     )
 
 
-def run() -> None:
+def run() -> int:
     init_ssl()
 
     from . import config
@@ -33,6 +34,11 @@ def run() -> None:
     from .prices import download_adj_close
 
     _configure_logging()
+
+    if not config.PATH_FONDER.exists():
+        print(f"Bryggans fonder.xlsx saknas: {config.PATH_FONDER}", file=sys.stderr)
+        return 2
+
     logging.info("Loading Excel inputs")
     tables = load_inputs(config.PATH_TRANSAKTIONER, config.PATH_FONDER)
 
@@ -123,7 +129,8 @@ def run() -> None:
     print(f"Number of benchmarks: {bm_count}")
     print(f"Date range: {min_date} -> {max_date}")
     print(f"Output path: {config.PORTFOLIO_OUTPUT_PATH}")
+    return 0
 
 
 if __name__ == "__main__":
-    run()
+    raise SystemExit(run())

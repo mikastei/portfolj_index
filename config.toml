@@ -1,0 +1,12 @@
+# config.toml – Portföljindex
+# Alla projektspecifika sökvägar samlade här.
+# Uppdatera vid byte av maskin eller mappstruktur.
+
+[paths]
+# Indata från Fondanalys-projektet
+transaktioner_xlsx = "/Users/mikael/Library/CloudStorage/OneDrive-EmsekAB/Emsek - Dokument/Privat/Fondanalys/02_Indata/transaktioner.xlsx"
+fonder_xlsx = "/Users/mikael/Library/CloudStorage/OneDrive-EmsekAB/Emsek - Dokument/Privat/Fondanalys/_Bridge/fonder.xlsx"
+
+# Bridge-publicering
+bi_data_published = "/Users/mikael/Library/CloudStorage/OneDrive-EmsekAB/Emsek - Dokument/Privat/Fondanalys/03_Utdata/portfolio_bi_data.xlsx"
+bi_data_archive = "/Users/mikael/Library/CloudStorage/OneDrive-EmsekAB/Emsek - Dokument/Privat/Fondanalys/03_Utdata/_archive/portfolio_bi_data"

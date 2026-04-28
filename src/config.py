@@ -1,11 +1,17 @@
 """Runtime configuration."""
 
+import tomllib
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[1]  # projektrot
 
-PATH_TRANSAKTIONER = r"C:\Users\mikae\OneDrive - Emsek AB\Emsek - Dokument\Privat\Fondanalys\02_Indata\transaktioner.xlsx"
-PATH_FONDER = r"C:\Users\mikae\Projekt\Fondanalys\data\fonder.xlsx"
+with open(BASE_DIR / "config.toml", "rb") as _f:
+    _CONFIG = tomllib.load(_f)
+
+PATH_TRANSAKTIONER = Path(_CONFIG["paths"]["transaktioner_xlsx"])
+PATH_FONDER = Path(_CONFIG["paths"]["fonder_xlsx"])
+BI_DATA_PUBLISHED_PATH = Path(_CONFIG["paths"]["bi_data_published"])
+BI_DATA_ARCHIVE_DIR = Path(_CONFIG["paths"]["bi_data_archive"])
 
 # Primary pipeline artifacts.
 PORTFOLIO_OUTPUT_PATH = BASE_DIR / "data" / "portfolio_output_timeseries.xlsx"
