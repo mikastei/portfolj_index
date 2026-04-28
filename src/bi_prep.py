@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -389,6 +391,38 @@ def _add_excel_table(writer: pd.ExcelWriter, sheet_name: str, table_name: str) -
         cell.fill = TABLE_HEADER_FILL
 
 
+def _publish_bi_data_to_bridge(local_path: Path) -> None:
+    """Atomic publicering av portfolio_bi_data.xlsx till SharePoint
+    03_Utdata/, med arkivering av tidigare version."""
+    import shutil
+    from datetime import datetime
+    from . import config
+
+    target = config.BI_DATA_PUBLISHED_PATH
+    archive_dir = config.BI_DATA_ARCHIVE_DIR
+
+    if not local_path.exists():
+        print(f"Lokal BI-fil saknas: {local_path}. Hoppar över publicering.")
+        return
+
+    if target.exists():
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        shutil.copy2(target, archive_dir / f"{ts}.xlsx")
+        archives = sorted(archive_dir.glob("*.xlsx"))
+        for old in archives[:-7]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".xlsx.tmp")
+    shutil.copy2(local_path, tmp)
+    tmp.replace(target)
+    print(f"Publicerade {target}")
+
+
 def run(
     source_output_path: str | Path | None = None,
     bi_output_path: str | Path | None = None,
@@ -462,6 +496,8 @@ def run(
         )
 
     logging.info("BI data workbook written: %s", output_path)
+
+    _publish_bi_data_to_bridge(output_path)
 
 
 if __name__ == "__main__":
