@@ -16,7 +16,7 @@ Det gemensamma sparet bygger den delade kallsanningen for downstream-konsumenter
 Kor:
 
 ```bash
-py -m src.main
+bash run_main.sh
 ```
 
 Input:
@@ -87,13 +87,14 @@ BI-sparet bygger ett separat datakontrakt for Power BI utan att lasa indatafiler
 Kor:
 
 ```bash
-py -m src.bi_prep
+bash run_bi.sh
 ```
 
 Principer for BI v1:
 
 - laser gemensam kalla: `data/portfolio_output_timeseries.xlsx`
 - bygger egen downstream-artefakt: `data/portfolio_bi_data.xlsx`
+- publicerar atomiskt till SharePoint `03_Utdata/portfolio_bi_data.xlsx` for Power BI-konsumtion
 - raknar KPI:er i Python, inte i DAX
 - ateranvander inte Excel/dashboard-artefakter
 
@@ -135,6 +136,7 @@ BI-spar:
 - `src/bi_io.py`
 - `src/bi_metrics.py`
 - `data/portfolio_bi_data.xlsx`
+- `03_Utdata/portfolio_bi_data.xlsx` (publicerad till SharePoint)
 
 Viktig princip:
 
@@ -142,24 +144,41 @@ Viktig princip:
 - BI-sparet konsumerar endast denna kalla
 - inget kvarvarande steg ska bero pa tidigare Excel/dashboard-artefakter
 
-## Batchkorning
+## Bryggintegration (2026-04-28)
 
-`Portföljindex.bat` kor nu standardflodet sekventiellt:
+Skarp drift gar via SharePoint-bryggan, inte manuell korning. VBA-knappen "Kor Portfoljindex" i `Fondanalys.xlsm` (Modul5) skriver en trigger:
 
-```bash
-py -m src.main
-py -m src.bi_prep
+```
+_Bridge/triggers/portfoljindex_<unix>_<id>.json
 ```
 
-`src.bi_prep` kors bara om `src.main` lyckas. BI-sparet finns fortfarande kvar som separat entry point for manuell felsokning eller om BI-underlaget ska byggas om fran befintlig upstream-fil.
+`bridge_orchestrator`-pollern pa Mac-AI (launchd, var 30 s) plockar upp triggern, kor `bash run_all.sh` (upstream + BI) och skriver status till:
+
+```
+_Bridge/status/portfoljindex.json
+```
+
+BI-output publiceras atomiskt till `03_Utdata/portfolio_bi_data.xlsx` pa SharePoint. Bryggans implementation lever i Fondanalys-repots `apps/bridge_orchestrator/`.
+
+## Sekventiell korning (manuell)
+
+For manuell korning av hela flodet:
+
+```bash
+bash run_all.sh
+```
+
+Skriptet kor `src.main` foljt av `src.bi_prep`. BI-steget kors bara om upstream lyckas. `run_main.sh` och `run_bi.sh` finns kvar som separata entry points for felsokning.
+
+Den gamla Windows-batchfilen `Portföljindex.bat` ar inte i drift langre och ska stadas bort fran Windows-laptopen (oppen punkt: ta bort gamla obsoleta Python-projektkopior pa Windows-laptopen).
 
 ## Tester och hjalpskript
 
 Aktiva projektskript:
 
-- `py -m src.main`
-- `py -m src.bi_prep`
-- `Portföljindex.bat`
+- `bash run_main.sh`
+- `bash run_bi.sh`
+- `bash run_all.sh`
 
 Projektet har nu ingen separat `dev/`-mapp langre. Hjalpskript och verifiering ligger under `tests/`.
 
@@ -191,4 +210,4 @@ Fel tecken kan skapa stora hopp i indexserierna.
 
 ---
 
-Senast uppdaterad: 2026-04-12
+Senast uppdaterad: 2026-04-29
