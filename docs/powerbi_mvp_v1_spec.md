@@ -404,13 +404,15 @@ Faktisk filterlogik i v1:
 Faktiskt byggt i PBIX:
 
 - en lokal datumslicer pa `Dim_Date[Date]` i `Between`-lage
-- ett linjediagram for `IDX`
+- ett linjediagram for rebased `IDX`
 - ett linjediagram for `DD`
 - bada visualerna anvander `Dim_Date[Date]` pa axeln
 - bada visualerna anvander `Dim_Series[Series_Label]` som legend
-- bada visualerna anvander `Fact_Series_Daily[IDX]` respektive `Fact_Series_Daily[DD]` som varde
+- `IDX`-visualen anvander measuret `Performance IDX Rebased` som varde
+- `DD`-visualen anvander fortsatt `Fact_Series_Daily[DD]` som varde
 - bada visualerna ar begransade med visualfiltret `Is Selected Overview Series = 1`
-- inga nya selector-measures eller andra nya DAX-measures har lagts till specifikt for `Performance`
+- `Performance IDX Rebased` rebases varje serie separat mot dess forsta synliga datapunkt inom valt datumintervall
+- syftet med rebasing ar att gora utvecklingen jamforbar mellan valda serier inom det valda datumintervallet
 - ingen KPI-tabell eller KPI-kort finns pa `Performance` i v1
 
 ## Avstamning mot tidigare specifikation
@@ -442,6 +444,7 @@ Foljande rapportdelar ar nu implementerade och manuellt verifierade:
 - `Overview` ar byggd och verifierad enligt aktuell v1-logik
 - `Performance` har tidsserievisuals for `IDX` och `DD`
 - `Performance` har lokal datumstyrning for tidsserievisuals
+- `Performance` visar rebased `IDX` for jamforbar utveckling mellan valda serier
 - samma selector-logik ateranvands pa `Overview` och `Performance`
 - inga andringar har behovt goras i BI-datakontraktet for att stanga `Performance`
 
@@ -456,9 +459,11 @@ Utifran nuvarande repo-dokumentation och manuellt verifierat PBIX-lage framstar 
 Det som ar verifierat i rapportlagret ar:
 
 - `Overview` ansvarar for KPI-kort och jamforelsetabell
-- `Performance` ansvarar for tidsserievisualisering via `IDX` och `DD`
+- `Performance` ansvarar for tidsserievisualisering via rebased `IDX` och `DD`
 - `Performance` ateranvander samma selector-logik som `Overview`
 - datumslicern pa `Performance` paverkar tidsserievisuals och inte KPI-ytan pa `Overview`
+- `IDX`-visualen pa `Performance` anvander `Performance IDX Rebased` for att lata alla valda serier starta pa samma niva inom valt datumintervall
+- `DD`-visualen pa `Performance` ar oforandrad
 - ingen KPI-tabell finns pa `Performance` i v1, for att undvika att blanda KPI-period med fri datumstyrning
 
 Kvarvarande arbete ligger darfor inte langre i definierad v1-scope, utan i eventuell slutlig produktbedomning eller senare utbyggnad.

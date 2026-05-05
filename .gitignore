@@ -1,5 +1,12 @@
 # virtual environment
 .venv/
+venv/
+
+# Codex (används ej längre)
+.codex/
+
+# Claude Code
+.claude/
 
 # python
 __pycache__/
@@ -7,7 +14,10 @@ __pycache__/
 .pytest_cache/
 
 # logs
-logs/
+logs/*.log
+
+# macOS
+.DS_Store
 
 # cache
 data/cache_prices.parquet

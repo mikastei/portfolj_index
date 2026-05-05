@@ -42,7 +42,7 @@ Rekommenderad korordning:
 
 Batchkorning via `Portföljindex.bat`:
 
-- aktiverar `.venv`
+- aktiverar `claude-env` (`/Users/mikael/Projects/claude-env/`)
 - kor `py -m src.main`
 - kor `py -m src.bi_prep` om steg 1 lyckas
 - loggar korningen till `logs/`

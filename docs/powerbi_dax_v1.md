@@ -330,6 +330,48 @@ RETURN
     )
 ```
 
+## Performance-measure
+
+Detta measure ar avsett endast for `IDX`-visualen pa `Performance`.
+
+### `Performance IDX Rebased`
+
+Syfte:
+
+- rebasa varje vald serie separat mot dess forsta synliga datapunkt inom valt datumintervall
+- gora utvecklingen jamforbar mellan serier i `Performance`-sidans `IDX`-graf
+- lata `DD` och `Overview` forbli oforandrade
+
+```DAX
+Performance IDX Rebased =
+VAR _currentIdx =
+    MAX ( Fact_Series_Daily[IDX] )
+VAR _startDate =
+    MINX (
+        FILTER (
+            ALLSELECTED ( Dim_Date[Date] ),
+            NOT ISBLANK (
+                CALCULATE (
+                    MAX ( Fact_Series_Daily[IDX] ),
+                    REMOVEFILTERS ( Dim_Date[Date] )
+                )
+            )
+        ),
+        Dim_Date[Date]
+    )
+VAR _baseIdx =
+    CALCULATE (
+        MAX ( Fact_Series_Daily[IDX] ),
+        REMOVEFILTERS ( Dim_Date[Date] ),
+        Dim_Date[Date] = _startDate
+    )
+RETURN
+    IF (
+        NOT ISBLANK ( _currentIdx ) && NOT ISBLANK ( _baseIdx ),
+        DIVIDE ( _currentIdx, _baseIdx ) * 100
+    )
+```
+
 ## Generiska KPI-measures
 
 Dessa measures ar avsedda for tabeller och annan radkontext dar vald serie kan komma antingen fran radens `Dim_Series` eller falla tillbaka till primarserien.
