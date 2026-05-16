@@ -57,6 +57,10 @@ def _nullable_text(series: pd.Series) -> pd.Series:
 def _combine_optional_columns(df: pd.DataFrame, target: str) -> pd.Series:
     map_column = f"{target}_map"
     series_column = f"{target}_series"
+    if map_column not in df.columns and series_column not in df.columns:
+        # Kolumnen finns bara i en av de två merge-källorna och fick inget suffix.
+        # Returnera den direkt om den existerar, annars en tom serie.
+        return df[target] if target in df.columns else pd.Series(pd.NA, index=df.index, dtype="object")
     map_values = df[map_column] if map_column in df.columns else pd.Series(pd.NA, index=df.index, dtype="object")
     series_values = (
         df[series_column] if series_column in df.columns else pd.Series(pd.NA, index=df.index, dtype="object")
