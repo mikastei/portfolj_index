@@ -183,6 +183,7 @@ def _instrument_metadata_by_ticker(mapping: pd.DataFrame) -> pd.DataFrame:
                 COL_PRICE_CCY,
                 "Instrument_Type",
                 "Category",
+                "Geography",
             ]
         )
 
@@ -198,6 +199,7 @@ def _instrument_metadata_by_ticker(mapping: pd.DataFrame) -> pd.DataFrame:
                 COL_PRICE_CCY,
                 "Instrument_Type",
                 "Category",
+                "Geography",
             ]
         )
 
@@ -212,7 +214,7 @@ def _instrument_metadata_by_ticker(mapping: pd.DataFrame) -> pd.DataFrame:
     else:
         map_df[COL_PRICE_CCY] = ""
 
-    for column in ("ISIN", "Instrument_Type", "Category"):
+    for column in ("ISIN", "Instrument_Type", "Category", "Geography"):
         if column not in map_df.columns:
             map_df[column] = ""
         map_df[column] = map_df[column].fillna("").astype(str).str.strip()
@@ -225,6 +227,7 @@ def _instrument_metadata_by_ticker(mapping: pd.DataFrame) -> pd.DataFrame:
             Price_Currency=(COL_PRICE_CCY, _first_unique_nonempty),
             Instrument_Type=("Instrument_Type", _first_unique_nonempty),
             Category=("Category", _first_unique_nonempty),
+            Geography=("Geography", _first_unique_nonempty),
         )
     )
     grouped["Display_Name"] = grouped["Display_Name"].where(
@@ -902,6 +905,7 @@ def build_series_definition(
                     "Price_Currency": None,
                     "Instrument_Type": None,
                     "Category": None,
+                    "Geography": None,
                     "Include_From_Date": idx_start,
                     "Index_Start_Date": idx_start,
                     "Initial_Index_Value": idx0,
@@ -928,6 +932,7 @@ def build_series_definition(
                     "Price_Currency": None,
                     "Instrument_Type": None,
                     "Category": category,
+                    "Geography": None,
                     "Include_From_Date": idx_start,
                     "Index_Start_Date": idx_start,
                     "Initial_Index_Value": idx0,
@@ -947,6 +952,16 @@ def build_series_definition(
             if pd.notna(price_ccy_raw) and str(price_ccy_raw).strip():
                 benchmark_price_currency = str(price_ccy_raw).strip().upper()
 
+        def _row_text(col: str) -> str | None:
+            """Returnera icke-tom sträng från Benchmarks-raden, annars None."""
+            if col not in row.index:
+                return None
+            val = row[col]
+            return str(val).strip() if pd.notna(val) and str(val).strip() else None
+
+        bm_category = _row_text("Category") or (info["Category"] if info is not None else None)
+        bm_geography = _row_text("Geography") or (info["Geography"] if info is not None else None)
+
         rows.append(
             {
                 "Series_ID": f"BM_{slug(row['Benchmark_ID'])}",
@@ -959,7 +974,8 @@ def build_series_definition(
                 "Display_Name": info["Display_Name"] if info is not None else None,
                 "Price_Currency": benchmark_price_currency or (info[COL_PRICE_CCY] if info is not None else None),
                 "Instrument_Type": info["Instrument_Type"] if info is not None else None,
-                "Category": info["Category"] if info is not None else None,
+                "Category": bm_category,
+                "Geography": bm_geography,
                 "Include_From_Date": pd.to_datetime(row["Include_From_Date"], errors="coerce"),
                 "Index_Start_Date": idx_start,
                 "Initial_Index_Value": idx0,
@@ -981,6 +997,7 @@ def build_series_definition(
                 "Price_Currency": info[COL_PRICE_CCY] if info is not None else None,
                 "Instrument_Type": info["Instrument_Type"] if info is not None else None,
                 "Category": info["Category"] if info is not None else None,
+                "Geography": info["Geography"] if info is not None else None,
                 "Include_From_Date": idx_start,
                 "Index_Start_Date": idx_start,
                 "Initial_Index_Value": np.nan,

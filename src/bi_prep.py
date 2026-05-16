@@ -57,6 +57,10 @@ def _nullable_text(series: pd.Series) -> pd.Series:
 def _combine_optional_columns(df: pd.DataFrame, target: str) -> pd.Series:
     map_column = f"{target}_map"
     series_column = f"{target}_series"
+    if map_column not in df.columns and series_column not in df.columns:
+        # Kolumnen finns bara i en av de två merge-källorna och fick inget suffix.
+        # Returnera den direkt om den existerar, annars en tom serie.
+        return df[target] if target in df.columns else pd.Series(pd.NA, index=df.index, dtype="object")
     map_values = df[map_column] if map_column in df.columns else pd.Series(pd.NA, index=df.index, dtype="object")
     series_values = (
         df[series_column] if series_column in df.columns else pd.Series(pd.NA, index=df.index, dtype="object")
@@ -90,6 +94,7 @@ def _build_analysis_metadata(
     metadata["Price_Currency"] = _nullable_text(metadata["Price_Currency"])
     metadata["Instrument_Type"] = _nullable_text(metadata["Instrument_Type"])
     metadata["Category"] = _nullable_text(metadata["Category"])
+    metadata["Geography"] = _nullable_text(metadata["Geography"])
     metadata = metadata[metadata["Series_ID"].isin(analysis_ids)].copy()
     if metadata.empty:
         raise ValueError("Series_Definition does not contain BI metadata for analysis series")
@@ -143,6 +148,7 @@ def _build_dim_series(analysis_metadata: pd.DataFrame) -> pd.DataFrame:
             "Variant",
             "Benchmark_ID",
             "Category",
+            "Geography",
             "Yahoo_Ticker",
             "ISIN",
             "Display_Name",
@@ -268,6 +274,7 @@ def _build_dim_instrument(
             "Price_Currency",
             "Instrument_Type",
             "Category",
+            "Geography",
         ]
     ].copy()
     series_rows["Yahoo_Ticker"] = _nullable_text(series_rows["Yahoo_Ticker"])
@@ -276,6 +283,7 @@ def _build_dim_instrument(
     series_rows["Price_Currency"] = _nullable_text(series_rows["Price_Currency"])
     series_rows["Instrument_Type"] = _nullable_text(series_rows["Instrument_Type"])
     series_rows["Category"] = _nullable_text(series_rows["Category"])
+    series_rows["Geography"] = _nullable_text(series_rows["Geography"])
 
     all_tickers = (
         pd.concat([map_rows[["Yahoo_Ticker"]], series_rows[["Yahoo_Ticker"]]], ignore_index=True)
@@ -294,6 +302,7 @@ def _build_dim_instrument(
                 "Price_Currency",
                 "Instrument_Type",
                 "Category",
+                "Geography",
                 "Structure",
             ]
         )
@@ -305,7 +314,7 @@ def _build_dim_instrument(
     )
     metadata_from_series = (
         series_rows.dropna(subset=["Yahoo_Ticker"])
-        .sort_values(["Yahoo_Ticker", "Display_Name", "ISIN", "Price_Currency", "Instrument_Type", "Category"])
+        .sort_values(["Yahoo_Ticker", "Display_Name", "ISIN", "Price_Currency", "Instrument_Type", "Category", "Geography"])
         .drop_duplicates(subset=["Yahoo_Ticker"], keep="first")
     )
     dim_instrument = all_tickers.merge(metadata_from_map, on="Yahoo_Ticker", how="left")
@@ -316,7 +325,7 @@ def _build_dim_instrument(
         suffixes=("_map", "_series"),
     )
     dim_instrument.insert(0, "Instrument_Key", dim_instrument["Yahoo_Ticker"])
-    for column in ("ISIN", "Display_Name", "Price_Currency", "Instrument_Type", "Category"):
+    for column in ("ISIN", "Display_Name", "Price_Currency", "Instrument_Type", "Category", "Geography"):
         dim_instrument[column] = _combine_optional_columns(dim_instrument, column)
     dim_instrument["Structure"] = pd.NA
     return dim_instrument[
@@ -328,6 +337,7 @@ def _build_dim_instrument(
             "Price_Currency",
             "Instrument_Type",
             "Category",
+            "Geography",
             "Structure",
         ]
     ]
