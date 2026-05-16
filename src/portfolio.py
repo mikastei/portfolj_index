@@ -952,6 +952,16 @@ def build_series_definition(
             if pd.notna(price_ccy_raw) and str(price_ccy_raw).strip():
                 benchmark_price_currency = str(price_ccy_raw).strip().upper()
 
+        def _row_text(col: str) -> str | None:
+            """Returnera icke-tom sträng från Benchmarks-raden, annars None."""
+            if col not in row.index:
+                return None
+            val = row[col]
+            return str(val).strip() if pd.notna(val) and str(val).strip() else None
+
+        bm_category = _row_text("Category") or (info["Category"] if info is not None else None)
+        bm_geography = _row_text("Geography") or (info["Geography"] if info is not None else None)
+
         rows.append(
             {
                 "Series_ID": f"BM_{slug(row['Benchmark_ID'])}",
@@ -964,8 +974,8 @@ def build_series_definition(
                 "Display_Name": info["Display_Name"] if info is not None else None,
                 "Price_Currency": benchmark_price_currency or (info[COL_PRICE_CCY] if info is not None else None),
                 "Instrument_Type": info["Instrument_Type"] if info is not None else None,
-                "Category": info["Category"] if info is not None else None,
-                "Geography": info["Geography"] if info is not None else None,
+                "Category": bm_category,
+                "Geography": bm_geography,
                 "Include_From_Date": pd.to_datetime(row["Include_From_Date"], errors="coerce"),
                 "Index_Start_Date": idx_start,
                 "Initial_Index_Value": idx0,
