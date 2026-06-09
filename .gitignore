@@ -24,3 +24,7 @@ data/cache_prices.parquet
 
 # generated workbooks
 data/*.xlsx
+
+# lokala config-backupar
+config.toml.bak
+config.toml.backup_cutover
