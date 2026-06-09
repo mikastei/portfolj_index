@@ -41,6 +41,14 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Path to portfolio_bi_data.xlsx",
     )
+    parser.add_argument(
+        "--publish-bridge",
+        action="store_true",
+        help=(
+            "Kopiera även BI-filen direkt till OneDrive (_publish_bi_data_to_bridge). "
+            "Avstängd som standard – nattjobbet sköter normalt OneDrive-kopian."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -436,6 +444,7 @@ def _publish_bi_data_to_bridge(local_path: Path) -> None:
 def run(
     source_output_path: str | Path | None = None,
     bi_output_path: str | Path | None = None,
+    publish_to_bridge: bool | None = None,
 ) -> None:
     """Read the shared workbook and write a first BI workbook."""
     _configure_logging()
@@ -507,7 +516,18 @@ def run(
 
     logging.info("BI data workbook written: %s", output_path)
 
-    _publish_bi_data_to_bridge(output_path)
+    # Väg B: direktpublicering till OneDrive är opt-in. Default sköter nattjobbet
+    # (Fondanalys backup-appen) OneDrive-kopian. Slå på via config publish_to_bridge
+    # eller CLI --publish-bridge för en samma-sessions PBI-refresh.
+    do_publish = config.BI_PUBLISH_TO_BRIDGE if publish_to_bridge is None else publish_to_bridge
+    if do_publish:
+        _publish_bi_data_to_bridge(output_path)
+    else:
+        logging.info(
+            "Direktpublicering till OneDrive avstängd (publish_to_bridge=false); "
+            "nattjobbet kopierar %s till bryggan.",
+            output_path.name,
+        )
 
 
 if __name__ == "__main__":
@@ -515,4 +535,5 @@ if __name__ == "__main__":
     run(
         source_output_path=args.input_path,
         bi_output_path=args.output_path,
+        publish_to_bridge=True if args.publish_bridge else None,
     )

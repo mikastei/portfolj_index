@@ -3,10 +3,23 @@
 # Uppdatera vid byte av maskin eller mappstruktur.
 
 [paths]
-# Indata från Fondanalys-projektet
+# Indata från Fondanalys-projektet.
+# transaktioner_xlsx ligger kvar på OneDrive tills cutover (Steg 6); flyttas till
+# datarotens 02_Indata/ enligt cutover-checklistan. Tills dess körs mot live-input.
 transaktioner_xlsx = "/Users/mikael/Library/CloudStorage/OneDrive-EmsekAB/Emsek - Dokument/Privat/Fondanalys/02_Indata/transaktioner.xlsx"
-fonder_xlsx = "/Users/mikael/Library/CloudStorage/OneDrive-EmsekAB/Emsek - Dokument/Privat/Fondanalys/_Bridge/fonder.xlsx"
+# fonder.xlsx läses från den maskinlokala datväxlingen (väg B), inte _Bridge.
+fonder_xlsx = "/Users/mikael/Fondanalys-Data/_exchange/fonder.xlsx"
 
-# Bridge-publicering
+# Lokal BI-output (väg B): bi_prep skriver portfolio_bi_data.xlsx till datarotens
+# 03_Utdata/. OneDrive-kopian sköts nattligt av Fondanalys backup-jobb, inte av
+# bi_prep:s direktpublicering (se publish_to_bridge nedan).
+bi_data_local_output = "/Users/mikael/Fondanalys-Data/03_Utdata/portfolio_bi_data.xlsx"
+
+# Direktpublicering till OneDrive (_publish_bi_data_to_bridge) är opt-in och
+# avstängd som standard – nattjobbet ansvarar för OneDrive-kopian. Slå på via
+# denna flagga eller bi_prep --publish-bridge när en samma-sessions PBI-refresh behövs.
+publish_to_bridge = false
+
+# Bridge-publicering (används bara när publish_to_bridge = true / --publish-bridge).
 bi_data_published = "/Users/mikael/Library/CloudStorage/OneDrive-EmsekAB/Emsek - Dokument/Privat/Fondanalys/03_Utdata/portfolio_bi_data.xlsx"
 bi_data_archive = "/Users/mikael/Library/CloudStorage/OneDrive-EmsekAB/Emsek - Dokument/Privat/Fondanalys/03_Utdata/_archive/portfolio_bi_data"

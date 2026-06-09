@@ -13,10 +13,20 @@ PATH_FONDER = Path(_CONFIG["paths"]["fonder_xlsx"])
 BI_DATA_PUBLISHED_PATH = Path(_CONFIG["paths"]["bi_data_published"])
 BI_DATA_ARCHIVE_DIR = Path(_CONFIG["paths"]["bi_data_archive"])
 
+# Väg B: direktpublicering till OneDrive är opt-in (default avstängd). Nattjobbet
+# i Fondanalys backup-appen ansvarar för OneDrive-kopian.
+BI_PUBLISH_TO_BRIDGE = bool(_CONFIG["paths"].get("publish_to_bridge", False))
+
 # Primary pipeline artifacts.
 PORTFOLIO_OUTPUT_PATH = BASE_DIR / "data" / "portfolio_output_timeseries.xlsx"
 BI_DATA_SOURCE_PATH = PORTFOLIO_OUTPUT_PATH
-BI_DATA_OUTPUT_PATH = BASE_DIR / "data" / "portfolio_bi_data.xlsx"
+# Väg B: BI-arbetsboken skrivs till datarotens 03_Utdata/ (maskinlokalt), inte
+# repo-data/. Faller tillbaka till repo-data/ om sökväg saknas i config.
+BI_DATA_OUTPUT_PATH = Path(
+    _CONFIG["paths"].get(
+        "bi_data_local_output", str(BASE_DIR / "data" / "portfolio_bi_data.xlsx")
+    )
+)
 
 # Temporary alias kept to avoid a half-migrated config surface.
 OUTPUT_PATH = PORTFOLIO_OUTPUT_PATH
