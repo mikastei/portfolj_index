@@ -41,14 +41,6 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         help="Path to portfolio_bi_data.xlsx",
     )
-    parser.add_argument(
-        "--publish-bridge",
-        action="store_true",
-        help=(
-            "Kopiera även BI-filen direkt till OneDrive (_publish_bi_data_to_bridge). "
-            "Avstängd som standard – nattjobbet sköter normalt OneDrive-kopian."
-        ),
-    )
     return parser.parse_args()
 
 
@@ -409,42 +401,9 @@ def _add_excel_table(writer: pd.ExcelWriter, sheet_name: str, table_name: str) -
         cell.fill = TABLE_HEADER_FILL
 
 
-def _publish_bi_data_to_bridge(local_path: Path) -> None:
-    """Atomic publicering av portfolio_bi_data.xlsx till SharePoint
-    03_Utdata/, med arkivering av tidigare version."""
-    import shutil
-    from datetime import datetime
-    from . import config
-
-    target = config.BI_DATA_PUBLISHED_PATH
-    archive_dir = config.BI_DATA_ARCHIVE_DIR
-
-    if not local_path.exists():
-        print(f"Lokal BI-fil saknas: {local_path}. Hoppar över publicering.")
-        return
-
-    if target.exists():
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        shutil.copy2(target, archive_dir / f"{ts}.xlsx")
-        archives = sorted(archive_dir.glob("*.xlsx"))
-        for old in archives[:-7]:
-            try:
-                old.unlink()
-            except OSError:
-                pass
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(".xlsx.tmp")
-    shutil.copy2(local_path, tmp)
-    tmp.replace(target)
-    print(f"Publicerade {target}")
-
-
 def run(
     source_output_path: str | Path | None = None,
     bi_output_path: str | Path | None = None,
-    publish_to_bridge: bool | None = None,
 ) -> None:
     """Read the shared workbook and write a first BI workbook."""
     _configure_logging()
@@ -515,19 +474,8 @@ def run(
         )
 
     logging.info("BI data workbook written: %s", output_path)
-
-    # Väg B: direktpublicering till OneDrive är opt-in. Default sköter nattjobbet
-    # (Fondanalys backup-appen) OneDrive-kopian. Slå på via config publish_to_bridge
-    # eller CLI --publish-bridge för en samma-sessions PBI-refresh.
-    do_publish = config.BI_PUBLISH_TO_BRIDGE if publish_to_bridge is None else publish_to_bridge
-    if do_publish:
-        _publish_bi_data_to_bridge(output_path)
-    else:
-        logging.info(
-            "Direktpublicering till OneDrive avstängd (publish_to_bridge=false); "
-            "nattjobbet kopierar %s till bryggan.",
-            output_path.name,
-        )
+    # Väg B: bi_prep skriver bara lokal BI-output. OneDrive-kopian sköts nattligt
+    # av Fondanalys backup-jobb.
 
 
 if __name__ == "__main__":
@@ -535,5 +483,4 @@ if __name__ == "__main__":
     run(
         source_output_path=args.input_path,
         bi_output_path=args.output_path,
-        publish_to_bridge=True if args.publish_bridge else None,
     )
