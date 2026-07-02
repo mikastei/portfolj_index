@@ -523,6 +523,23 @@ def _real_position_state(
         .sort_index()
     )
     shares_isin = flows_isin.cumsum()
+
+    # Ett ackumulerat innehav under noll betyder att transaktionsdatan saknar
+    # ingående innehav (köp före exportens start) – indexet blir då fel.
+    min_shares = shares_isin.min()
+    negative = min_shares[min_shares < -1e-6]
+    if not negative.empty:
+        net_final = shares_isin.iloc[-1]
+        details = "; ".join(
+            f"{isin}: net={net_final[isin]:.4f}, min={negative[isin]:.4f}"
+            for isin in sorted(negative.index)
+        )
+        portfolio_label = f" (portfolio={portfolio_name})" if portfolio_name else ""
+        raise ValueError(
+            f"Negative accumulated position for ISIN(s){portfolio_label}: {details}. "
+            "Transactions are likely missing opening holdings bought before the export starts."
+        )
+
     shares_isin = shares_isin.reindex(prices.index).ffill().fillna(0.0)
 
     isin_to_ticker = tx.dropna(subset=["ISIN", "Yahoo_Ticker"]).drop_duplicates(subset=["ISIN"]).set_index("ISIN")[
