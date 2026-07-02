@@ -35,8 +35,12 @@ def run() -> int:
 
     _configure_logging()
 
-    if not config.PATH_FONDER.exists():
-        print(f"Bryggans fonder.xlsx saknas: {config.PATH_FONDER}", file=sys.stderr)
+    missing_inputs = [
+        path for path in (config.PATH_TRANSAKTIONER, config.PATH_FONDER) if not path.exists()
+    ]
+    if missing_inputs:
+        for path in missing_inputs:
+            print(f"Indatafil saknas: {path}", file=sys.stderr)
         return 2
 
     logging.info("Loading Excel inputs")
