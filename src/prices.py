@@ -102,12 +102,29 @@ def fetch_prices_yahoo(
 
     cached = _read_cache(cache_path)
     cache_hit = not cached.empty
-    has_all_cols = cache_hit and all(t in cached.columns for t in clean)
+    cache_valid = cache_hit and all(t in cached.columns for t in clean)
+    if cache_valid:
+        empty_cols = [t for t in clean if cached[t].dropna().empty]
+        if empty_cols:
+            logger.warning(
+                "Cache has no data for ticker(s) %s; refetching full range", empty_cols
+            )
+            cache_valid = False
+    if cache_valid:
+        first_cached = pd.Timestamp(cached.index.min()).normalize()
+        # Tolerans för att begärt startdatum kan vara helg/helgdag utan prisrad.
+        if first_cached > start_ts + pd.Timedelta(days=7):
+            logger.warning(
+                "Cache starts %s but %s was requested; refetching full range",
+                first_cached.date().isoformat(),
+                start_ts.date().isoformat(),
+            )
+            cache_valid = False
     incremental = False
 
     fetch_needed = True
     fetch_start = start_ts
-    if has_all_cols:
+    if cache_valid:
         last_cached = cached.index.max()
         if pd.notna(last_cached):
             fetch_start = max(start_ts, pd.Timestamp(last_cached).normalize() + pd.Timedelta(days=1))
@@ -137,7 +154,7 @@ def fetch_prices_yahoo(
             if attempt < 3:
                 time.sleep(sleep_s)
         if downloaded.empty:
-            if incremental and cache_hit and has_all_cols:
+            if incremental and cache_valid:
                 logger.warning(
                     "Yahoo returned no new rows for incremental fetch %s -> %s; using cached prices through %s",
                     fetch_start.date().isoformat(),
@@ -165,6 +182,16 @@ def fetch_prices_yahoo(
     merged.index = pd.to_datetime(merged.index)
     merged = merged[~merged.index.duplicated(keep="last")]
     merged = merged.sort_index()
+    # Yahoo returnerar ibland lördags-/söndagsrader med stale fondkurser (gammalt
+    # NAV som upprepas). Helgdatum hör inte hemma i priskalendern – FX-kurser på
+    # helger tillför inget för värderingen – så helgrader tas bort helt.
+    weekend = merged.index.dayofweek >= 5
+    if weekend.any():
+        logger.info(
+            "Dropping %s weekend row(s) with stale quotes from price calendar",
+            int(weekend.sum()),
+        )
+        merged = merged.loc[~weekend]
     if forward_fill:
         merged[clean] = merged[clean].ffill()
 
