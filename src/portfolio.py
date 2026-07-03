@@ -29,6 +29,11 @@ DEBUG_ENABLED = os.getenv("PORTFOLIO_DEBUG") == "1"
 STRICT_VALUATION = os.getenv("PORTFOLIO_STRICT") == "1"
 STRICT_EXTREME_RET = os.getenv("STRICT_EXTREME_RET", "1") != "0"
 
+# Tolerans för rundningsdamm i ackumulerade andelsantal (Nordnet 4 decimaler).
+# Ligger långt under varje verklig saknad ingående balans (hundratals andelar),
+# så vakten mot negativa positioner behåller sitt skydd.
+DUST_SHARES = 1e-3
+
 
 def slug(value: str) -> str:
     text = re.sub(r"[^A-Za-z0-9]+", "_", str(value).upper())
@@ -523,6 +528,12 @@ def _real_position_state(
         .sort_index()
     )
     shares_isin = flows_isin.cumsum()
+
+    # Nordnet avrundar andelsantal till 4 decimaler, så en "sälj allt" kan lämna
+    # en rundningsrest på ~1e-4 andelar. Snäpp sådant ekonomiskt obetydligt damm
+    # till 0 – annars larmar vakten nedan på fullt likviderade positioner och
+    # resten skulle dessutom värderas som ett pyttelitet kvarvarande innehav.
+    shares_isin = shares_isin.mask(shares_isin.abs() < DUST_SHARES, 0.0)
 
     # Ett ackumulerat innehav under noll betyder att transaktionsdatan saknar
     # ingående innehav (köp före exportens start) – indexet blir då fel.
