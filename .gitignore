@@ -13,17 +13,15 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# logs
-logs/*.log
+# logs (regenereras av pipeline/schemajobb)
+logs/
 
 # macOS
 .DS_Store
 
-# cache
-data/cache_prices.parquet
-
-# generated workbooks
-data/*.xlsx
+# regenererbar dataoutput: priscache + genererade arbetsböcker
+# (schemalagt 06:00-jobb skriver hit – ska aldrig smutsa arbetsträdet)
+data/
 
 # lokala config-backupar
 config.toml.bak
