@@ -23,6 +23,9 @@ logs/
 # (schemalagt 06:00-jobb skriver hit – ska aldrig smutsa arbetsträdet)
 data/
 
+# genererade rapporter (fond-rapport-piloten) – byggs om ur BI-filen
+reports/
+
 # lokala config-backupar
 config.toml.bak
 config.toml.backup_cutover
