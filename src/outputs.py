@@ -56,10 +56,15 @@ def write_output_excel(
     portfolio_series_map: pd.DataFrame,
     master_long: pd.DataFrame,
     run_config: pd.DataFrame,
+    portfolio_alloc_monthly: pd.DataFrame | None = None,
 ) -> None:
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         series_definition.to_excel(writer, sheet_name="Series_Definition", index=False)
         portfolio_series_map.to_excel(writer, sheet_name="Portfolio_Series_Map", index=False)
+        if portfolio_alloc_monthly is not None:
+            portfolio_alloc_monthly.to_excel(
+                writer, sheet_name="Portfolio_Alloc_Monthly", index=False
+            )
         master_long.to_excel(writer, sheet_name="Master_TimeSeries_Long", index=False)
         run_config.to_excel(writer, sheet_name="Run_Config", index=False)

@@ -25,6 +25,7 @@ def run() -> int:
     from .outputs import build_master_timeseries_long, build_run_config, write_output_excel
     from .portfolio import (
         EngineInputs,
+        build_portfolio_alloc_monthly,
         build_portfolio_series_map,
         build_portfolios_and_benchmarks,
         build_series_definition,
@@ -105,6 +106,13 @@ def run() -> int:
         prices,
         base_currency=config.BASE_CURRENCY,
     )
+    portfolio_alloc_monthly = build_portfolio_alloc_monthly(
+        tables["portfolio_metadata"],
+        tables["transactions"],
+        tables["mapping"],
+        prices,
+        base_currency=config.BASE_CURRENCY,
+    )
     master_long = build_master_timeseries_long(series_map)
     run_config = build_run_config(
         path_transaktioner=config.PATH_TRANSAKTIONER,
@@ -122,6 +130,7 @@ def run() -> int:
         portfolio_series_map=portfolio_series_map,
         master_long=master_long,
         run_config=run_config,
+        portfolio_alloc_monthly=portfolio_alloc_monthly,
     )
 
     bm_count = sum(1 for sid in series_map if sid.startswith("BM_"))

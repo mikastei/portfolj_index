@@ -42,6 +42,24 @@ REQUIRED_SHEETS: dict[str, list[str]] = {
     ],
 }
 
+# Optional sheet: historical month-end REAL allocation weights. Older upstream
+# workbooks predate it, so BI degrades gracefully to an empty series when absent.
+ALLOC_MONTHLY_SHEET = "Portfolio_Alloc_Monthly"
+ALLOC_MONTHLY_COLUMNS = [
+    "Portfolio_Name",
+    "Series_ID",
+    "Period_End_Date",
+    "Yahoo_Ticker",
+    "ISIN",
+    "Display_Name",
+    "Price_Currency",
+    "Category",
+    "Market_Value_SEK",
+    "Portfolio_MV_SEK",
+    "Weight",
+    "Weight_Source",
+]
+
 
 @dataclass(frozen=True)
 class PortfolioOutputSource:
@@ -52,6 +70,7 @@ class PortfolioOutputSource:
     series_definition: pd.DataFrame
     portfolio_series_map: pd.DataFrame
     run_config: pd.DataFrame
+    portfolio_alloc_monthly: pd.DataFrame
 
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -113,13 +132,36 @@ def load_portfolio_output(path: str | Path) -> PortfolioOutputSource:
     run_config["RF_RATE_ANNUAL"] = pd.to_numeric(run_config["RF_RATE_ANNUAL"], errors="coerce")
     run_config["TRADING_DAYS_PER_YEAR"] = pd.to_numeric(run_config["TRADING_DAYS_PER_YEAR"], errors="coerce")
 
+    portfolio_alloc_monthly = _load_alloc_monthly(sheets)
+
     return PortfolioOutputSource(
         source_path=source_path,
         master_long=master_long,
         series_definition=series_definition,
         portfolio_series_map=portfolio_series_map,
         run_config=run_config,
+        portfolio_alloc_monthly=portfolio_alloc_monthly,
     )
+
+
+def _load_alloc_monthly(sheets: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Read the optional monthly allocation sheet, empty frame when absent."""
+    if ALLOC_MONTHLY_SHEET not in sheets:
+        return pd.DataFrame(columns=ALLOC_MONTHLY_COLUMNS)
+    alloc = sheets[ALLOC_MONTHLY_SHEET].copy()
+    _validate_columns(
+        alloc,
+        ["Portfolio_Name", "Series_ID", "Period_End_Date", "Yahoo_Ticker", "Weight"],
+        ALLOC_MONTHLY_SHEET,
+    )
+    alloc["Period_End_Date"] = pd.to_datetime(alloc["Period_End_Date"], errors="coerce")
+    alloc["Series_ID"] = alloc["Series_ID"].astype(str).str.strip()
+    alloc["Portfolio_Name"] = alloc["Portfolio_Name"].astype(str).str.strip()
+    alloc["Yahoo_Ticker"] = alloc["Yahoo_Ticker"].astype(str).str.strip()
+    for column in ("Market_Value_SEK", "Portfolio_MV_SEK", "Weight"):
+        if column in alloc.columns:
+            alloc[column] = pd.to_numeric(alloc[column], errors="coerce")
+    return alloc
 
 
 def extract_run_parameters(run_config: pd.DataFrame) -> tuple[float, int]:

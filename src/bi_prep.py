@@ -19,6 +19,21 @@ from .bi_metrics import PERIOD_ORDER, compute_kpis, has_minimum_observations, sl
 
 ANALYSIS_PREFIXES = ("PORT_", "BM_")
 ALLOCATION_SNAPSHOT_SHEET_NAME = "Fact_Portfolio_Alloc_Snapshot"
+ALLOCATION_MONTHLY_SHEET_NAME = "Fact_Portfolio_Alloc_Monthly"
+ALLOCATION_MONTHLY_COLUMNS = [
+    "Portfolio_Key",
+    "Series_ID",
+    "Instrument_Key",
+    "ISIN",
+    "Display_Name",
+    "Price_Currency",
+    "Category",
+    "Period_End_Date",
+    "Market_Value_SEK",
+    "Portfolio_MV_SEK",
+    "Weight",
+    "Weight_Source",
+]
 TABLE_HEADER_FILL = PatternFill(fill_type="solid", fgColor="D9EAF7")
 
 
@@ -379,6 +394,57 @@ def _build_fact_portfolio_allocation_snapshot(
     ].sort_values(["Portfolio_Key", "Series_ID", "Instrument_Key"]).reset_index(drop=True)
 
 
+def _build_fact_portfolio_alloc_monthly(
+    portfolio_alloc_monthly: pd.DataFrame,
+    dim_series: pd.DataFrame,
+) -> pd.DataFrame:
+    """Historical month-end REAL allocation weights, fund grain, star-schema keyed.
+
+    Category weights are an exact roll-up in Power BI: sum ``Weight`` over the
+    ``Category`` attribute within each Portfolio_Key/Period_End_Date. Links to
+    Dim_Portfolio (Portfolio_Key), Dim_Instrument (Instrument_Key), Dim_Series
+    (Series_ID) and Dim_Date (Period_End_Date).
+    """
+    if portfolio_alloc_monthly.empty:
+        return pd.DataFrame(columns=ALLOCATION_MONTHLY_COLUMNS)
+
+    valid_series = set(dim_series["Series_ID"].tolist())
+    monthly = portfolio_alloc_monthly.copy()
+    monthly["Portfolio_Name"] = _nullable_text(monthly["Portfolio_Name"])
+    monthly["Series_ID"] = _clean_text(monthly["Series_ID"])
+    monthly["Yahoo_Ticker"] = _nullable_text(monthly["Yahoo_Ticker"])
+    monthly["ISIN"] = _nullable_text(monthly["ISIN"])
+    monthly["Display_Name"] = _nullable_text(monthly["Display_Name"])
+    monthly["Price_Currency"] = _nullable_text(monthly["Price_Currency"])
+    monthly["Category"] = _nullable_text(monthly["Category"])
+    monthly["Weight_Source"] = (
+        _nullable_text(monthly["Weight_Source"])
+        if "Weight_Source" in monthly.columns
+        else pd.Series(pd.NA, index=monthly.index, dtype="object")
+    )
+    monthly["Period_End_Date"] = pd.to_datetime(monthly["Period_End_Date"], errors="coerce").dt.normalize()
+    for column in ("Market_Value_SEK", "Portfolio_MV_SEK", "Weight"):
+        monthly[column] = (
+            pd.to_numeric(monthly[column], errors="coerce")
+            if column in monthly.columns
+            else pd.Series(pd.NA, index=monthly.index, dtype="float")
+        )
+
+    monthly = monthly[
+        monthly["Series_ID"].isin(valid_series)
+        & monthly["Yahoo_Ticker"].notna()
+        & monthly["Weight"].notna()
+        & monthly["Period_End_Date"].notna()
+    ].copy()
+    monthly["Portfolio_Key"] = monthly["Portfolio_Name"]
+    monthly["Instrument_Key"] = monthly["Yahoo_Ticker"]
+    return (
+        monthly[ALLOCATION_MONTHLY_COLUMNS]
+        .sort_values(["Portfolio_Key", "Period_End_Date", "Series_ID", "Instrument_Key"])
+        .reset_index(drop=True)
+    )
+
+
 def _add_excel_table(writer: pd.ExcelWriter, sheet_name: str, table_name: str) -> None:
     """Wrap a worksheet's used range in an Excel table for more stable Power BI navigation."""
     worksheet = writer.sheets[sheet_name]
@@ -433,6 +499,10 @@ def run(
         dim_series,
         snapshot_date,
     )
+    fact_allocation_monthly = _build_fact_portfolio_alloc_monthly(
+        source.portfolio_alloc_monthly,
+        dim_series,
+    )
 
     logging.info(
         "BI analysis universe: %s series, %s daily rows, %s KPI rows, snapshot date %s",
@@ -441,6 +511,17 @@ def run(
         len(fact_series_kpi),
         pd.Timestamp(snapshot_date).date().isoformat(),
     )
+    if fact_allocation_monthly.empty:
+        logging.info(
+            "Fact_Portfolio_Alloc_Monthly is empty; upstream workbook has no %s sheet",
+            "Portfolio_Alloc_Monthly",
+        )
+    else:
+        logging.info(
+            "Fact_Portfolio_Alloc_Monthly: %s rows across %s month-end period(s)",
+            len(fact_allocation_monthly),
+            fact_allocation_monthly["Period_End_Date"].nunique(),
+        )
     if dim_instrument.empty:
         logging.info("Dim_Instrument is empty; upstream artifact did not materialize instrument tickers")
     else:
@@ -461,6 +542,11 @@ def run(
             sheet_name=ALLOCATION_SNAPSHOT_SHEET_NAME,
             index=False,
         )
+        fact_allocation_monthly.to_excel(
+            writer,
+            sheet_name=ALLOCATION_MONTHLY_SHEET_NAME,
+            index=False,
+        )
         _add_excel_table(writer, "Dim_Date", "Dim_Date")
         _add_excel_table(writer, "Dim_Portfolio", "Dim_Portfolio")
         _add_excel_table(writer, "Dim_Series", "Dim_Series")
@@ -471,6 +557,11 @@ def run(
             writer,
             ALLOCATION_SNAPSHOT_SHEET_NAME,
             ALLOCATION_SNAPSHOT_SHEET_NAME,
+        )
+        _add_excel_table(
+            writer,
+            ALLOCATION_MONTHLY_SHEET_NAME,
+            ALLOCATION_MONTHLY_SHEET_NAME,
         )
 
     logging.info("BI data workbook written: %s", output_path)

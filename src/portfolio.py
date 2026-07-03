@@ -1235,6 +1235,74 @@ def _latest_real_weights(
     return weights / weights.sum()
 
 
+def _real_weights_monthly(
+    transactions: pd.DataFrame,
+    mapping: pd.DataFrame,
+    prices: pd.DataFrame,
+    base_currency: str = "SEK",
+    portfolio_name: str | None = None,
+) -> pd.DataFrame:
+    """Month-end market-value weights per ticker from the daily REAL valuation.
+
+    Reuses the exact same daily ``contributions`` (antal × pris i SEK) that build
+    the REAL index and REAL_CAT series, so this is an *exposure* of an already
+    computed valuation, not a new calculation. Sampled at the last valued trading
+    day of each calendar month. The final month-end coincides with the snapshot
+    date used by :func:`_latest_real_weights`, so those weights match by
+    construction.
+
+    Returns a long frame with one row per (month-end, ticker):
+    ``Period_End_Date, Yahoo_Ticker, Market_Value_SEK, Portfolio_MV_SEK, Weight``.
+    """
+    _tx, _effective_shares, contributions, _price_base_df, isin_to_ticker, _px_local = _real_position_state(
+        transactions,
+        mapping,
+        prices,
+        base_currency=base_currency,
+        portfolio_name=portfolio_name,
+    )
+    if contributions.empty or contributions.shape[1] == 0:
+        raise ValueError(f"Portfolio has no real holdings snapshot (portfolio={portfolio_name})")
+
+    total_value = contributions.sum(axis=1).fillna(0.0)
+    valued = total_value[total_value > 0]
+    if valued.empty:
+        raise ValueError(f"Portfolio has no positive real holdings value (portfolio={portfolio_name})")
+
+    # Last valued trading day within each calendar month = month-end observation.
+    valued_dates = pd.Series(valued.index, index=valued.index)
+    month_end_dates = sorted(valued_dates.groupby(valued.index.to_period("M")).max().tolist())
+
+    rows: list[dict[str, object]] = []
+    for date in month_end_dates:
+        snapshot = contributions.loc[date]
+        snapshot = snapshot[snapshot > 0].dropna()
+        if snapshot.empty:
+            continue
+        by_ticker: dict[str, float] = {}
+        for isin, value in snapshot.items():
+            ticker = str(isin_to_ticker.loc[isin]).strip() if isin in isin_to_ticker.index else ""
+            if not ticker:
+                continue
+            by_ticker[ticker] = by_ticker.get(ticker, 0.0) + float(value)
+        total_mv = sum(by_ticker.values())
+        if total_mv <= 0:
+            continue
+        for ticker, mv in by_ticker.items():
+            rows.append(
+                {
+                    "Period_End_Date": pd.Timestamp(date).normalize(),
+                    "Yahoo_Ticker": ticker,
+                    "Market_Value_SEK": float(mv),
+                    "Portfolio_MV_SEK": float(total_mv),
+                    "Weight": float(mv) / float(total_mv),
+                }
+            )
+    if not rows:
+        raise ValueError(f"Portfolio real holdings produced no monthly weights (portfolio={portfolio_name})")
+    return pd.DataFrame(rows)
+
+
 def build_portfolio_series_map(
     portfolio_metadata: pd.DataFrame,
     transactions: pd.DataFrame,
@@ -1342,3 +1410,104 @@ def build_portfolio_series_map(
                 }
             )
     return pd.DataFrame(rows)
+
+
+ALLOC_MONTHLY_COLUMNS = [
+    "Portfolio_Name",
+    "Series_ID",
+    "Period_End_Date",
+    "Yahoo_Ticker",
+    "ISIN",
+    "Display_Name",
+    "Price_Currency",
+    "Category",
+    "Market_Value_SEK",
+    "Portfolio_MV_SEK",
+    "Weight",
+    "Weight_Source",
+]
+
+
+def build_portfolio_alloc_monthly(
+    portfolio_metadata: pd.DataFrame,
+    transactions: pd.DataFrame,
+    mapping: pd.DataFrame,
+    prices: pd.DataFrame,
+    base_currency: str = "SEK",
+) -> pd.DataFrame:
+    """Historical month-end REAL allocation weights per portfolio and fund.
+
+    A long, fund-grained series (Portfolio × Period_End_Date × ticker). Category
+    weights are an exact roll-up: sum ``Weight`` over the ``Category`` attribute
+    within each portfolio/period. Weights per portfolio/period sum to 1.0, and the
+    last month-end reproduces the REAL snapshot in
+    :func:`build_portfolio_series_map`, since both read the same daily valuation.
+    """
+    rows: list[dict[str, object]] = []
+    instrument_meta = _instrument_metadata_by_ticker(mapping).set_index("Yahoo_Ticker", drop=False)
+    meta_rows = _portfolio_rows(portfolio_metadata)
+    tx_all = transactions.copy()
+    if "Portfolio_ID" not in tx_all.columns and "Depå" in tx_all.columns:
+        tx_all["Portfolio_ID"] = tx_all["Depå"]
+    meta_port_col = "Portfolio_ID" if "Portfolio_ID" in portfolio_metadata.columns else "Portfolio_Name"
+    tx_port_col = "Portfolio_ID" if "Portfolio_ID" in tx_all.columns and meta_port_col == "Portfolio_ID" else _portfolio_name_col(tx_all)
+    if len(meta_rows) > 1 and tx_port_col is None:
+        raise ValueError("Transactions must include a portfolio column when multiple portfolios exist")
+
+    for meta in meta_rows:
+        portfolio_name = str(meta["Portfolio_Name"])
+        portfolio_key = str(meta[meta_port_col]).strip() if meta_port_col in meta.index else portfolio_name
+        start_date = pd.to_datetime(meta["Index_Start_Date"])
+
+        if tx_port_col is None:
+            tx_p = tx_all
+        else:
+            tx_p = tx_all[tx_all[tx_port_col].astype(str).str.strip() == portfolio_key]
+
+        real_tickers = []
+        if not tx_p.empty and "ISIN" in tx_p.columns:
+            map_df = mapping.copy()
+            map_df["ISIN"] = map_df["ISIN"].astype(str).str.strip()
+            map_df["Yahoo_Ticker"] = map_df["Yahoo_Ticker"].astype(str).str.strip()
+            isin_to_ticker = map_df.set_index("ISIN")["Yahoo_Ticker"].to_dict()
+            tx_isins = tx_p["ISIN"].dropna().astype(str).str.strip()
+            real_tickers = sorted({isin_to_ticker.get(isin, "") for isin in tx_isins if isin_to_ticker.get(isin, "")})
+        real_fx_tickers = _fx_tickers_for_assets(real_tickers, mapping, base_currency)
+        prices_real = _portfolio_price_frame(prices, real_tickers, start_date, extra_tickers=real_fx_tickers)
+        if prices_real.empty:
+            prices_real = prices[prices.index >= start_date].copy()
+
+        try:
+            monthly = _real_weights_monthly(
+                tx_p,
+                mapping,
+                prices_real,
+                base_currency=base_currency,
+                portfolio_name=portfolio_name,
+            )
+        except ValueError as exc:
+            logger.warning("Skipping monthly REAL allocation for portfolio=%s: %s", portfolio_name, exc)
+            continue
+
+        series_id = f"PORT_{slug(portfolio_name)}_REAL"
+        for record in monthly.to_dict(orient="records"):
+            ticker = str(record["Yahoo_Ticker"]).strip()
+            info = instrument_meta.loc[ticker] if ticker in instrument_meta.index else None
+            rows.append(
+                {
+                    "Portfolio_Name": portfolio_name,
+                    "Series_ID": series_id,
+                    "Period_End_Date": record["Period_End_Date"],
+                    "Yahoo_Ticker": ticker,
+                    "ISIN": info["ISIN"] if info is not None else None,
+                    "Display_Name": info["Display_Name"] if info is not None else ticker,
+                    "Price_Currency": info[COL_PRICE_CCY] if info is not None else None,
+                    "Category": info["Category"] if info is not None else None,
+                    "Market_Value_SEK": float(record["Market_Value_SEK"]),
+                    "Portfolio_MV_SEK": float(record["Portfolio_MV_SEK"]),
+                    "Weight": float(record["Weight"]),
+                    "Weight_Source": "REAL",
+                }
+            )
+
+    return pd.DataFrame(rows, columns=ALLOC_MONTHLY_COLUMNS)
