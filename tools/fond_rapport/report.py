@@ -1,8 +1,11 @@
-"""HTML-bygge för fond-rapporten (Steg 1-pilot).
+"""HTML-bygge för fond-rapporten.
 
-All text med siffror i rapporten formateras ur beräknade värden – inga tal är
-hårdkodade i prosan. Tolkningssektionen innehåller fasta resonemang (bias,
-Steg 2-avgränsningar, rekommendation) vars sifferunderlag injiceras.
+Rapporten ställer EGEN (den verkliga portföljen) mot PA – referensportföljen som
+EGEN ska slå – plus externa benchmarks, allt över ett gemensamt analysfönster som
+startar vid EGEN:s inception. Alla serier rebaseras till bas 100 vid startdatumet
+och skärs till [inception, as_of]; alla horisonter och KPI:er räknas relativt
+as-of. Inga tal är hårdkodade i prosan – sifferunderlaget injiceras ur de beräknade
+fönster-KPI:erna.
 """
 
 from __future__ import annotations
@@ -14,9 +17,14 @@ import pandas as pd
 from . import charts
 from .attribution import TOP_N_FUNDS, PortfolioAttribution
 from .data import BIData, series_index
+from .metrics import KPI_COLUMNS as METRIC_KPIS
 from .verify import VerificationResult
+from .window import Horizon, rebase_series
 
 PORTFOLIOS = ["PA", "EGEN"]
+
+HEADLINE_SERIES = "PORT_EGEN_REAL"
+REFERENCE_SERIES = "PORT_PA_REAL"
 
 SERIES_LABELS = {
     "PORT_PA_REAL": "PA – Verklig portfölj (REAL)",
@@ -63,10 +71,14 @@ KPI_COLUMNS = [
 
 
 def fmt_pct(value: float, decimals: int = 1) -> str:
-    return f"{value * 100.0:.{decimals}f}".replace(".", ",") + " %"
+    if pd.isna(value):
+        return "–"
+    return f"{value * 100.0:.{decimals}f}".replace(".", ",") + " %"
 
 
 def fmt_num(value: float, decimals: int = 2) -> str:
+    if pd.isna(value):
+        return "–"
     return f"{value:.{decimals}f}".replace(".", ",")
 
 
@@ -76,11 +88,21 @@ def fmt_idx(value: float) -> str:
 
 def fmt_pp(value: float, decimals: int = 1) -> str:
     """Skillnad i procentenheter, med tecken."""
-    return f"{value * 100.0:+.{decimals}f}".replace(".", ",") + " p.e."
+    if pd.isna(value):
+        return "–"
+    return f"{value * 100.0:+.{decimals}f}".replace(".", ",") + " p.e."
 
 
 def _fore_efter(diff: float) -> str:
     return "före" if diff > 0 else "efter"
+
+
+# --- fönsterserier ------------------------------------------------------------
+
+
+def _windowed(data: BIData, series_id: str, inception: pd.Timestamp, as_of: pd.Timestamp) -> pd.Series:
+    """Rebaserad (bas 100 vid inception) och as-of-skuren IDX-serie."""
+    return rebase_series(series_index(data, series_id), inception, as_of)
 
 
 # --- tabellhjälp --------------------------------------------------------------
@@ -106,6 +128,42 @@ def _kpi_table(kpi: pd.DataFrame, period: str) -> str:
     )
 
 
+def _horizon_table(kpi: pd.DataFrame, horizons: list[Horizon]) -> str:
+    """Avkastning per horisont: kumulativ (<1 år) eller CAGR (≥1 år), per serie."""
+    shown = kpi.set_index(["Series_ID", "Period"])
+    available = [h for h in horizons if h.available]
+    header_cells = "".join(
+        "<th>{}<br><span class=\"sub\">{}<br>{}</span></th>".format(
+            h.label,
+            "kumulativ" if h.measure == "cumulative" else "CAGR",
+            h.date_range(),
+        )
+        for h in available
+    )
+    rows = []
+    for series_id in KPI_TABLE_SERIES:
+        cells = []
+        for h in available:
+            key = (series_id, h.key)
+            if key in shown.index:
+                column = "Return_Total" if h.measure == "cumulative" else "CAGR"
+                cells.append(f"<td>{fmt_pct(float(shown.loc[key, column]))}</td>")
+            else:
+                cells.append("<td>–</td>")
+        css = ' class="real-row"' if series_id.endswith("_REAL") else ""
+        rows.append(f"<tr{css}><td>{SERIES_LABELS[series_id]}</td>{''.join(cells)}</tr>")
+    table = (
+        f"<table><thead><tr><th>Serie</th>{header_cells}</tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+    omitted = [h for h in horizons if not h.available]
+    caption = ""
+    if omitted:
+        items = "".join(f"<li><strong>{h.label}:</strong> {html.escape(h.note)}</li>" for h in omitted)
+        caption = f'<div class="warn"><p>Utelämnade horisonter:</p><ul>{items}</ul></div>'
+    return table + caption
+
+
 def _category_series(data: BIData, portfolio: str) -> list[tuple[str, str]]:
     """[(Series_ID, kategorinamn)] för portföljens REAL_CAT-serier."""
     dim = data.dim_series
@@ -116,17 +174,24 @@ def _category_series(data: BIData, portfolio: str) -> list[tuple[str, str]]:
     return [(row["Series_ID"], row["Category"]) for _, row in dim[mask].iterrows()]
 
 
-def _category_table(data: BIData, portfolio: str) -> tuple[str, pd.DataFrame]:
-    kpi = data.fact_kpi.set_index(["Series_ID", "Period"])
+def _category_table(data: BIData, portfolio: str, kpi: pd.DataFrame) -> tuple[str, pd.DataFrame]:
+    shown = kpi.set_index(["Series_ID", "Period"])
+    has_1y = "1Y" in set(kpi["Period"])
     rows = []
     for series_id, category in _category_series(data, portfolio):
-        since = kpi.loc[(series_id, "Since_Start")]
-        one_year = kpi.loc[(series_id, "1Y")]
+        if (series_id, "Since_Start") not in shown.index:
+            continue
+        since = shown.loc[(series_id, "Since_Start")]
+        ret_1y = (
+            float(shown.loc[(series_id, "1Y"), "Return_Total"])
+            if has_1y and (series_id, "1Y") in shown.index
+            else float("nan")
+        )
         rows.append(
             {
                 "Kategori": category,
                 "Ret_Since": float(since["Return_Total"]),
-                "Ret_1Y": float(one_year["Return_Total"]),
+                "Ret_1Y": ret_1y,
                 "Sharpe_Since": float(since["Sharpe"]),
                 "MaxDD_Since": float(since["Max_DD"]),
             }
@@ -175,38 +240,63 @@ def _allocation_table(data: BIData, portfolio: str) -> str:
 # --- sektionsbyggare ----------------------------------------------------------
 
 
-def _relative_series(data: BIData, portfolio: str) -> list[tuple[str, pd.Series, str]]:
-    real = series_index(data, f"PORT_{portfolio}_REAL")
+def _relative_series(
+    data: BIData, portfolio: str, inception: pd.Timestamp, as_of: pd.Timestamp
+) -> list[tuple[str, pd.Series, str]]:
+    real = _windowed(data, f"PORT_{portfolio}_REAL", inception, as_of)
     out = []
     for other_id, label, style in (
         (f"PORT_{portfolio}_CUR", "REAL / CUR", "CUR"),
         (f"PORT_{portfolio}_TGT", "REAL / TGT", "TGT"),
         ("BM_BM_NORDNET_BALANSERAD", "REAL / Nordnet Balanserad", "BM1"),
     ):
-        other = series_index(data, other_id)
+        other = _windowed(data, other_id, inception, as_of)
         joined = pd.concat([real, other], axis=1, join="inner", keys=["real", "other"])
         out.append((label, joined["real"] / joined["other"] * 100.0, style))
     return out
 
 
-def _facts(data: BIData, portfolio: str) -> dict:
-    """Beräknade nyckelvärden som tolkningssektionen bygger på."""
-    kpi = data.fact_kpi.set_index(["Series_ID", "Period"])
+def _headline_section(
+    data: BIData, inception: pd.Timestamp, as_of: pd.Timestamp
+) -> str:
+    series = [
+        ("EGEN – verklig (REAL)", _windowed(data, "PORT_EGEN_REAL", inception, as_of), "EGEN"),
+        ("PA – referens att slå (REAL)", _windowed(data, "PORT_PA_REAL", inception, as_of), "PA"),
+        ("Nordnet Balanserad", _windowed(data, "BM_BM_NORDNET_BALANSERAD", inception, as_of), "BM1"),
+        ("Nordnet Offensiv", _windowed(data, "BM_BM_NORDNET_OFFENSIV", inception, as_of), "BM2"),
+    ]
+    png = charts.line_chart(
+        series,
+        f"EGEN mot PA och externa benchmarks (bas 100 vid {inception.date()})",
+        "Index (bas 100)",
+        baseline=100.0,
+    )
+    return f'<img src="data:image/png;base64,{png}" alt="EGEN mot PA och benchmarks">'
+
+
+def _facts(
+    data: BIData, portfolio: str, kpi: pd.DataFrame, inception: pd.Timestamp, as_of: pd.Timestamp
+) -> dict:
+    """Beräknade nyckelvärden som tolkningssektionen bygger på (över fönstret)."""
+    shown = kpi.set_index(["Series_ID", "Period"])
+    has_1y = "1Y" in set(kpi["Period"])
 
     def since(series_id: str, column: str) -> float:
-        return float(kpi.loc[(series_id, "Since_Start"), column])
+        return float(shown.loc[(series_id, "Since_Start"), column])
 
     def one_year(series_id: str, column: str) -> float:
-        return float(kpi.loc[(series_id, "1Y"), column])
+        if not has_1y or (series_id, "1Y") not in shown.index:
+            return float("nan")
+        return float(shown.loc[(series_id, "1Y"), column])
 
     real, cur, tgt = (f"PORT_{portfolio}_{v}" for v in ("REAL", "CUR", "TGT"))
     bal, off = "BM_BM_NORDNET_BALANSERAD", "BM_BM_NORDNET_OFFENSIV"
 
-    _, cat_frame = _category_table(data, portfolio)
+    _, cat_frame = _category_table(data, portfolio, kpi)
     return {
-        "idx_real": float(series_index(data, real).iloc[-1]),
-        "idx_cur": float(series_index(data, cur).iloc[-1]),
-        "idx_tgt": float(series_index(data, tgt).iloc[-1]),
+        "idx_real": float(_windowed(data, real, inception, as_of).iloc[-1]),
+        "idx_cur": float(_windowed(data, cur, inception, as_of).iloc[-1]),
+        "idx_tgt": float(_windowed(data, tgt, inception, as_of).iloc[-1]),
         "ret_real": since(real, "Return_Total"),
         "ret_cur": since(cur, "Return_Total"),
         "ret_tgt": since(tgt, "Return_Total"),
@@ -221,21 +311,24 @@ def _facts(data: BIData, portfolio: str) -> dict:
         "sharpe_bal": since(bal, "Sharpe"),
         "ret_real_1y": one_year(real, "Return_Total"),
         "ret_bal_1y": one_year(bal, "Return_Total"),
+        "has_1y": has_1y,
         "categories": cat_frame,
     }
 
 
-def _portfolio_index_section(data: BIData, portfolio: str) -> str:
+def _portfolio_index_section(
+    data: BIData, portfolio: str, inception: pd.Timestamp, as_of: pd.Timestamp
+) -> str:
     main = [
-        (SERIES_LABELS[f"PORT_{portfolio}_REAL"], series_index(data, f"PORT_{portfolio}_REAL"), "REAL"),
-        (SERIES_LABELS[f"PORT_{portfolio}_CUR"], series_index(data, f"PORT_{portfolio}_CUR"), "CUR"),
-        (SERIES_LABELS[f"PORT_{portfolio}_TGT"], series_index(data, f"PORT_{portfolio}_TGT"), "TGT"),
-        ("Nordnet Balanserad", series_index(data, "BM_BM_NORDNET_BALANSERAD"), "BM1"),
-        ("Nordnet Offensiv", series_index(data, "BM_BM_NORDNET_OFFENSIV"), "BM2"),
+        (SERIES_LABELS[f"PORT_{portfolio}_REAL"], _windowed(data, f"PORT_{portfolio}_REAL", inception, as_of), "REAL"),
+        (SERIES_LABELS[f"PORT_{portfolio}_CUR"], _windowed(data, f"PORT_{portfolio}_CUR", inception, as_of), "CUR"),
+        (SERIES_LABELS[f"PORT_{portfolio}_TGT"], _windowed(data, f"PORT_{portfolio}_TGT", inception, as_of), "TGT"),
+        ("Nordnet Balanserad", _windowed(data, "BM_BM_NORDNET_BALANSERAD", inception, as_of), "BM1"),
+        ("Nordnet Offensiv", _windowed(data, "BM_BM_NORDNET_OFFENSIV", inception, as_of), "BM2"),
     ]
-    idx_png = charts.line_chart(main, f"{portfolio}: indexutveckling (bas 100)", "Index", baseline=100.0)
+    idx_png = charts.line_chart(main, f"{portfolio}: indexutveckling (bas 100 vid {inception.date()})", "Index", baseline=100.0)
     rel_png = charts.line_chart(
-        _relative_series(data, portfolio),
+        _relative_series(data, portfolio, inception, as_of),
         f"{portfolio}: relativ utveckling – REAL mot referenser (100 = lika)",
         "Kvot × 100",
         baseline=100.0,
@@ -247,13 +340,15 @@ def _portfolio_index_section(data: BIData, portfolio: str) -> str:
     )
 
 
-def _category_section(data: BIData, portfolio: str) -> str:
+def _category_section(
+    data: BIData, portfolio: str, inception: pd.Timestamp, as_of: pd.Timestamp, kpi: pd.DataFrame
+) -> str:
     cat_series = [
-        (category, series_index(data, series_id))
+        (category, _windowed(data, series_id, inception, as_of))
         for series_id, category in _category_series(data, portfolio)
     ]
-    png = charts.category_chart(cat_series, f"{portfolio}: kategoriserier (REAL, bas 100)")
-    table, frame = _category_table(data, portfolio)
+    png = charts.category_chart(cat_series, f"{portfolio}: kategoriserier (REAL, bas 100 vid {inception.date()})")
+    table, frame = _category_table(data, portfolio, kpi)
     best = frame.iloc[0]
     worst = frame.iloc[-1]
     summary = (
@@ -286,25 +381,41 @@ def _allocation_section(data: BIData, portfolio: str) -> str:
     )
 
 
-def _interpretation_section(data: BIData) -> str:
-    pa = _facts(data, "PA")
-    egen = _facts(data, "EGEN")
+def _interpretation_section(
+    data: BIData, kpi: pd.DataFrame, inception: pd.Timestamp, as_of: pd.Timestamp
+) -> str:
+    pa = _facts(data, "PA", kpi, inception, as_of)
+    egen = _facts(data, "EGEN", kpi, inception, as_of)
 
     def gap_text(f: dict, portfolio: str) -> str:
         gap_cur = f["ret_real"] - f["ret_cur"]
         gap_bal = f["ret_real"] - f["ret_bal"]
-        gap_bal_1y = f["ret_real_1y"] - f["ret_bal_1y"]
+        one_year_clause = ""
+        if f["has_1y"]:
+            gap_bal_1y = f["ret_real_1y"] - f["ret_bal_1y"]
+            one_year_clause = f" senaste året är avståndet {fmt_pp(gap_bal_1y)}."
         return (
             f"<p><strong>{portfolio}:</strong> REAL står i {fmt_idx(f['idx_real'])} "
             f"({fmt_pct(f['ret_real'])} sedan start, CAGR {fmt_pct(f['cagr_real'])}), "
             f"mot CUR {fmt_idx(f['idx_cur'])} och TGT {fmt_idx(f['idx_tgt'])}. "
             f"Gapet REAL−CUR är {fmt_pp(gap_cur)} i totalavkastning. "
             f"Mot Nordnet Balanserad ({fmt_pct(f['ret_bal'])}) ligger REAL "
-            f"{fmt_pp(gap_bal)}, dvs. {_fore_efter(gap_bal)} referensen sedan start; "
-            f"senaste året är avståndet {fmt_pp(gap_bal_1y)}. "
+            f"{fmt_pp(gap_bal)}, dvs. {_fore_efter(gap_bal)} referensen sedan start;"
+            f"{one_year_clause} "
             f"Riskjusterat: Sharpe {fmt_num(f['sharpe_real'])} för REAL mot "
             f"{fmt_num(f['sharpe_bal'])} för Nordnet Balanserad.</p>"
         )
+
+    gap_egen_pa = egen["ret_real"] - pa["ret_real"]
+    egen_vs_pa = (
+        f"<p><strong>EGEN mot PA (kärnfrågan):</strong> över det gemensamma fönstret "
+        f"({inception.date()} – {as_of.date()}) avkastade EGEN {fmt_pct(egen['ret_real'])} "
+        f"mot PA:s {fmt_pct(pa['ret_real'])} – EGEN ligger {fmt_pp(gap_egen_pa)} "
+        f"{_fore_efter(gap_egen_pa)} referensportföljen. Riskjusterat är Sharpe "
+        f"{fmt_num(egen['sharpe_real'])} (EGEN) mot {fmt_num(pa['sharpe_real'])} (PA). "
+        f"PA är den portfölj EGEN ska slå; båda mäts från EGEN:s inception så att "
+        f"jämförelsen sker över EGEN:s livslängd, inte PA:s längre historik.</p>"
+    )
 
     egen_worst = egen["categories"].iloc[-1]
     egen_best = egen["categories"].iloc[0]
@@ -312,6 +423,7 @@ def _interpretation_section(data: BIData) -> str:
 
     return f"""
 <h3>6.1 Vad siffrorna visar</h3>
+{egen_vs_pa}
 {gap_text(pa, "PA")}
 {gap_text(egen, "EGEN")}
 <p>Kategorimässigt (deskriptivt): i EGEN drog
@@ -332,7 +444,7 @@ medvind. Det gäller särskilt EGEN, där gapet ({fmt_pp(egen['ret_real'] - egen
 till stor del kan bero på att dagens lista innehåller periodens vinnare, inte på att
 de löpande besluten kostat motsvarande belopp.</p>
 <p><strong>Vad datan stödjer i dag:</strong> (1) Den externa jämförelsen REAL mot
-Nordnet-referenserna är rättvis i tiden – samma period, samma bas, daglig TWR, priser
+Nordnet-referenserna är rättvis i tiden – samma fönster, samma bas, daglig TWR, priser
 valutakonverterade till SEK uppströms. Där ligger båda portföljerna efter Nordnet
 Balanserad sedan start, både absolut och riskjusterat. (2) För PA är REAL-vs-CUR-gapet
 litet ({fmt_pp(pa['ret_real'] - pa['ret_cur'])}) med likvärdig Sharpe
@@ -350,11 +462,12 @@ avgiftsmotvinden – den kräver TER per fond (Steg 2b) och kvantifieras inte h�
 <h3>6.3 Pilotens metafråga och rekommendation</h3>
 <p>Ger den här rapporten beslutsvärde utöver Power BI? Bedömning: <strong>ja, men på
 tolknings- och verifieringslagret snarare än på siffrorna</strong>. Kurvorna och
-KPI-tabellerna finns redan i Power BI. Det rapporten tillför är (1) en oberoende
-omräkning av samtliga KPI:er ur dagsserierna med redovisad tolerans, (2) explicit
+KPI-tabellerna finns redan i Power BI. Det rapporten tillför är (1) ett gemensamt
+analysfönster ankrat vid EGEN:s inception så att EGEN mäts rättvist mot PA, (2) en
+oberoende omräkning av samtliga KPI:er över fönstret med redovisad tolerans, (3) explicit
 bias-hantering – Power BI visar gapet men förklarar inte varför det inte får läsas som
-skicklighet, och (3) ett reproducerbart, versionerat underlag som kan byggas om vid
-varje datauppdatering.</p>
+skicklighet, och (4) ett reproducerbart, versionerat underlag som kan byggas om vid
+varje datauppdatering och as-of-datum.</p>
 <p><strong>Rekommendation: fortsätt, med justerat scope.</strong> Med Steg 2a-vikterna
 på plats attribuerar avsnitt 5 nu gapet mekaniskt (allokering/selektion/koncentration).
 Den kvarvarande dataluckan med störst beslutsvärde är TER per fond (Steg 2b) – utan den
@@ -592,7 +705,13 @@ def _verification_section(result: VerificationResult, contract_failures: list[st
         f"<td>{fmt_idx(row['Observerat'])}</td><td>{'OK' if row['OK'] else 'AVVIKER'}</td></tr>"
         for _, row in result.anchor_rows.iterrows()
     )
-    worst = result.kpi_comparison.nlargest(5, "Diff")
+    rebase_all_ok = bool(result.rebase_rows["OK"].all()) if not result.rebase_rows.empty else True
+    rebase_status = (
+        f"samtliga {len(result.rebase_rows)} serier står på exakt bas 100 vid startdatumet"
+        if rebase_all_ok
+        else f"<strong>{int((~result.rebase_rows['OK']).sum())} serier avviker från bas 100</strong>"
+    )
+    worst = result.kpi_comparison.nlargest(5, "Diff") if not result.kpi_comparison.empty else result.kpi_comparison
     worst_rows = "".join(
         f"<tr><td>{row['Series_ID']}</td><td>{row['Period']}</td><td>{row['KPI']}</td>"
         f"<td>{row['Diff']:.2e}</td></tr>"
@@ -611,12 +730,15 @@ def _verification_section(result: VerificationResult, contract_failures: list[st
         else f"<strong>{result.n_deviations} avvikelser utanför tolerans</strong>"
     )
     return f"""
-<p>KPI:erna räknades om oberoende ur <code>Fact_Series_Daily</code> (samma definitioner
-som pipelinen: rf 3&nbsp;% årligen, 252 handelsdagar, CAGR på kalenderdagar/365,25) och
-jämfördes mot <code>Fact_Series_KPI</code>: {result.n_compared} värden jämförda,
-{status}. Största absoluta avvikelse: {result.max_abs_diff:.2e}.</p>
+<p>KPI:erna räknades om oberoende över det gemensamma fönstret ur
+<code>Fact_Series_Daily</code> (samma definitioner som pipelinen: rf 3&nbsp;% årligen,
+252 handelsdagar, CAGR på kalenderdagar/365,25) och jämfördes mot de tal rapporten
+visar: {result.n_compared} värden jämförda, {status}. Största absoluta avvikelse:
+{result.max_abs_diff:.2e}.</p>
+<p>Rebaseringskontroll: {rebase_status} (största avvikelse {result.max_rebase_diff:.2e}
+indexpunkter).</p>
 {contract}
-<h4>Ankarkontroll REAL-nivåer</h4>
+<h4>Ankarkontroll REAL-nivåer (hela källserien)</h4>
 <table><thead><tr><th>Serie</th><th>Förväntat</th><th>Observerat</th><th>Status</th></tr></thead>
 <tbody>{anchor_rows}</tbody></table>
 <h4>Största observerade differenser (topp 5)</h4>
@@ -637,6 +759,7 @@ img { max-width: 100%; height: auto; display: block; margin: .8rem 0; }
 table { border-collapse: collapse; width: 100%; font-size: .82rem; margin: .8rem 0; }
 th, td { border: 1px solid #ccc; padding: .35rem .5rem; text-align: right; }
 th:first-child, td:first-child { text-align: left; }
+th .sub { font-weight: 400; font-size: .72rem; color: #555; }
 thead { background: #eef2f8; }
 tr.real-row { background: #e8eefb; font-weight: 600; }
 .meta { background: #f6f6f6; border-left: 4px solid #1f4e9c; padding: .8rem 1rem;
@@ -650,54 +773,70 @@ def build_html(
     data: BIData,
     verification: VerificationResult,
     contract_failures: list[str],
+    inception: pd.Timestamp,
+    as_of: pd.Timestamp,
+    horizons: list[Horizon],
+    kpi: pd.DataFrame,
     attributions: dict[str, PortfolioAttribution] | None = None,
 ) -> str:
     """Sätt ihop hela rapporten till en självbärande HTML-sträng."""
-    daily = data.fact_daily
-    start_date = daily["Date"].min().date()
-    end_date = daily["Date"].max().date()
+    start_date = inception.date()
+    end_date = as_of.date()
+    window_years = (as_of - inception).days / 365.25
 
-    index_sections = "".join(_portfolio_index_section(data, p) for p in PORTFOLIOS)
-    category_sections = "".join(_category_section(data, p) for p in PORTFOLIOS)
+    headline = _headline_section(data, inception, as_of)
+    index_sections = "".join(_portfolio_index_section(data, p, inception, as_of) for p in PORTFOLIOS)
+    category_sections = "".join(_category_section(data, p, inception, as_of, kpi) for p in PORTFOLIOS)
     allocation_sections = "".join(_allocation_section(data, p) for p in PORTFOLIOS)
 
     return f"""<!DOCTYPE html>
 <html lang="sv">
 <head>
 <meta charset="utf-8">
-<title>Fond-rapport (pilot) – {end_date}</title>
+<title>Fond-rapport – {end_date}</title>
 <style>{_CSS}</style>
 </head>
 <body>
-<h1>Fond-rapport – presterar den verkliga portföljen? (Steg 1-pilot)</h1>
+<h1>Fond-rapport – slår EGEN referensportföljen PA?</h1>
 <div class="meta">
 <p><strong>Källa:</strong> portfolio_bi_data.xlsx (läst read-only) ·
-<strong>Period:</strong> {start_date} – {end_date} ·
+<strong>Analysfönster:</strong> {start_date} – {end_date} ({window_years:.2f} år) ·
+<strong>As-of:</strong> {end_date} ·
 <strong>Byggd av:</strong> tools/fond_rapport (deterministisk beräkning i Python).</p>
+<p><strong>Ram:</strong> EGEN är den verkliga portföljen; PA är referensportföljen
+EGEN ska slå. Fönstret startar vid EGEN:s inception ({start_date} – EGEN:s första
+värderade REAL-position), härledd ur datan. Alla serier – PA/EGEN REAL/CUR/TGT samt
+externa benchmarks – rebaseras till bas 100 vid detta datum och skärs till fönstret,
+så att jämförelserna sker över EGEN:s livslängd, inte PA:s längre historik.</p>
 <p><strong>Metod:</strong> Alla serier är dagliga tidsviktade avkastningar (TWR),
 index bas 100, priser valutakonverterade till SEK uppströms. KPI:er enligt
-pipelinens definitioner (rf 3&nbsp;%, 252 handelsdagar). Alla tal i rapporten är
-beräknade ur källfilen – inget är uppskattat.</p>
+pipelinens definitioner (rf 3&nbsp;%, 252 handelsdagar), räknade över fönstret. Alla
+tal i rapporten är beräknade ur källfilen – inget är uppskattat.</p>
 </div>
 
-<h2>1. Index: REAL mot referenser</h2>
-<p>REAL är den faktiskt realiserade portföljen (transaktionsbaserad). CUR och TGT är
+<h2>1. Index: EGEN mot PA och referenser</h2>
+<p>EGEN (blå) mäts mot PA (röd) – referensportföljen som ska slås – samt externa
+blandfondsreferenser, allt rebaserat till 100 vid EGEN:s inception. CUR och TGT är
 statiska buy-and-hold-referenser av den <em>nuvarande</em> fondlistan respektive
-målvikterna, bakåtprojicerade – se förbehållen i avsnitt 5.2 innan gapet tolkas.
-Nordnet Balanserad och Offensiv är externa blandfondsreferenser.</p>
+målvikterna, bakåtprojicerade – se förbehållen i avsnitt 6.2 innan gapet tolkas.</p>
+{headline}
 {index_sections}
 
 <h2>2. Nyckeltal per serie</h2>
-<h3>Sedan start ({start_date} – {end_date})</h3>
-{_kpi_table(data.fact_kpi, "Since_Start")}
-<h3>Senaste året (1Y)</h3>
-{_kpi_table(data.fact_kpi, "1Y")}
+<h3>Avkastning per horisont</h3>
+<p>Kumulativ avkastning för horisonter under ett år, CAGR för ett år och längre;
+datumintervallen står i kolumnrubrikerna. Alla horisonter räknas relativt as-of
+({end_date}).</p>
+{_horizon_table(kpi, horizons)}
+<h3>Fullständiga nyckeltal – sedan start ({start_date} – {end_date})</h3>
+{_kpi_table(kpi, "Since_Start")}
+{_one_year_kpi_block(kpi, horizons)}
 
 <h2>3. Kategorier – var fanns avkastningen?</h2>
 <div class="warn"><p>Kategoriserierna är tidsviktade delportföljer (REAL_CAT). De visar
 <em>var</em> avkastningen fanns, inte hur mycket varje kategori <em>bidrog</em> till
-portföljens totala avkastning – bidragsanalys kräver historiska vikter (Steg 2,
-Brinson). Läs tabellerna deskriptivt.</p></div>
+portföljens totala avkastning – bidragsanalys görs i attributionen (avsnitt 5). Läs
+tabellerna deskriptivt.</p></div>
 {category_sections}
 
 <h2>4. Aktuell allokering (snapshot)</h2>
@@ -709,7 +848,7 @@ Brinson). Läs tabellerna deskriptivt.</p></div>
 {_attribution_section(attributions)}
 
 <h2>6. Tolkning och metodikbedömning</h2>
-{_interpretation_section(data)}
+{_interpretation_section(data, kpi, inception, as_of)}
 
 <h2>Bilaga: Självverifiering</h2>
 {_verification_section(verification, contract_failures)}
@@ -717,3 +856,12 @@ Brinson). Läs tabellerna deskriptivt.</p></div>
 </body>
 </html>
 """
+
+
+def _one_year_kpi_block(kpi: pd.DataFrame, horizons: list[Horizon]) -> str:
+    """Fullständig KPI-tabell för 1Y om horisonten är tillgänglig, annars en not."""
+    one_year = next((h for h in horizons if h.key == "1Y"), None)
+    if one_year is None or not one_year.available:
+        note = one_year.note if one_year else "1Y ej definierad."
+        return f'<h3>Senaste året (1Y)</h3><div class="warn"><p>{html.escape(note)}</p></div>'
+    return f"<h3>Senaste året (1Y: {one_year.date_range()})</h3>{_kpi_table(kpi, '1Y')}"

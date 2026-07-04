@@ -21,6 +21,9 @@ STYLE = {
     "BM1": {"color": "#777777", "linewidth": 1.2, "linestyle": "--"},
     "BM2": {"color": "#aaaaaa", "linewidth": 1.2, "linestyle": "--"},
     "BM3": {"color": "#c49a6c", "linewidth": 1.2, "linestyle": ":"},
+    # Headline-diagrammet: EGEN (blå, kraftig) mot PA (röd, referensen att slå).
+    "EGEN": {"color": "#1f4e9c", "linewidth": 2.6, "linestyle": "-"},
+    "PA": {"color": "#b04a4a", "linewidth": 2.2, "linestyle": "-"},
 }
 
 CATEGORY_COLORS = ["#1f4e9c", "#e07b39", "#2e8b57", "#b04a4a", "#7a5ca8", "#4aa0b0"]

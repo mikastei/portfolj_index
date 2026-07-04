@@ -25,6 +25,11 @@ BI_DATA_OUTPUT_PATH = Path(
 # Temporary alias kept to avoid a half-migrated config surface.
 OUTPUT_PATH = PORTFOLIO_OUTPUT_PATH
 
+# Fond-rapportens HTML-utdata (datarot). Faller tillbaka till repo-reports/.
+FOND_RAPPORT_OUTPUT_DIR = Path(
+    _CONFIG["paths"].get("fond_rapport_output_dir", str(BASE_DIR / "reports"))
+)
+
 BASE_CURRENCY = "SEK"
 RF_RATE_ANNUAL = 0.03
 TRADING_DAYS_PER_YEAR = 252

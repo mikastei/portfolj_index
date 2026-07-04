@@ -13,3 +13,7 @@ fonder_xlsx = "/Users/mikael/Fondanalys-Data/_exchange/fonder.xlsx"
 # Lokal BI-output (väg B): bi_prep skriver portfolio_bi_data.xlsx till datarotens
 # 03_Utdata/. OneDrive-kopian sköts nattligt av Fondanalys backup-jobb.
 bi_data_local_output = "/Users/mikael/Fondanalys-Data/03_Utdata/portfolio_bi_data.xlsx"
+
+# Fond-rapportens utdata (självbärande HTML) i den maskinlokala dataroten.
+# Filnamn: fond_rapport_<as-of>.html. Faller tillbaka till repo-reports/ om tomt.
+fond_rapport_output_dir = "/Users/mikael/Fondanalys-Data/04_Analyser/Portföljanalyser"
