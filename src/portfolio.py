@@ -1511,3 +1511,152 @@ def build_portfolio_alloc_monthly(
             )
 
     return pd.DataFrame(rows, columns=ALLOC_MONTHLY_COLUMNS)
+
+
+COURTAGE_COLUMNS = [
+    "Portfolio_Name",
+    "Portfolio_ID",
+    "Series_ID",
+    "Period_End_Date",
+    "ISIN",
+    "Yahoo_Ticker",
+    "Display_Name",
+    "Category",
+    "Currency",
+    "Courtage_Native",
+    "Courtage_SEK",
+    "Txn_Count",
+]
+
+
+def build_portfolio_courtage(
+    portfolio_metadata: pd.DataFrame,
+    transactions: pd.DataFrame,
+    mapping: pd.DataFrame,
+    base_currency: str = "SEK",
+) -> pd.DataFrame:
+    """Realiserat courtage per portfölj × månad × instrument × valuta.
+
+    Courtaget läses direkt ur Nordnet-exportens ``Courtage``-kolumn och grupperas
+    med samma portföljscoping (Depå→Portfolio_ID) som REAL-serierna, så siffrorna är
+    konsistenta med kassaflödena. ``Courtage_Native`` är råvärdet i transaktionens
+    valuta (verifierbart mot en rå summering av Courtage-kolumnen); ``Courtage_SEK``
+    konverteras till basvaluta med exakt samma kurslogik som ``Belopp``
+    (Referensvalutakurs, fallback Växlingskurs). Courtaget ligger redan inbakat i
+    ``Belopp`` och därmed i REAL – detta är alltså en synliggörande uppdelning, inte
+    en extra dragning. Endast rader med courtage != 0 tas med.
+    """
+    courtage_col = "Courtage"
+    if courtage_col not in transactions.columns:
+        return pd.DataFrame(columns=COURTAGE_COLUMNS)
+
+    base_ccy = str(base_currency).upper().strip()
+    meta_rows = _portfolio_rows(portfolio_metadata)
+
+    tx_all = transactions.copy()
+    if "Portfolio_ID" not in tx_all.columns and "Depå" in tx_all.columns:
+        tx_all["Portfolio_ID"] = tx_all["Depå"]
+    meta_port_col = "Portfolio_ID" if "Portfolio_ID" in portfolio_metadata.columns else "Portfolio_Name"
+    tx_port_col = "Portfolio_ID" if "Portfolio_ID" in tx_all.columns and meta_port_col == "Portfolio_ID" else _portfolio_name_col(tx_all)
+    if len(meta_rows) > 1 and tx_port_col is None:
+        raise ValueError("Transactions must include a portfolio column when multiple portfolios exist")
+
+    # ISIN → instrumentmetadata (ticker/namn/kategori) via mapping.
+    map_df = mapping.copy()
+    map_df["ISIN"] = map_df["ISIN"].astype(str).str.strip()
+    for col in ("Yahoo_Ticker", "Category"):
+        if col not in map_df.columns:
+            map_df[col] = ""
+        map_df[col] = map_df[col].fillna("").astype(str).str.strip()
+    name_col = "Name" if "Name" in map_df.columns else None
+    isin_meta = map_df[map_df["ISIN"] != ""].drop_duplicates(subset=["ISIN"]).set_index("ISIN")
+
+    rows: list[dict[str, object]] = []
+    for meta in meta_rows:
+        portfolio_name = str(meta["Portfolio_Name"])
+        portfolio_key = str(meta[meta_port_col]).strip() if meta_port_col in meta.index else portfolio_name
+
+        if tx_port_col is None:
+            tx_p = tx_all.copy()
+        else:
+            tx_p = tx_all[tx_all[tx_port_col].astype(str).str.strip() == portfolio_key].copy()
+        if tx_p.empty:
+            continue
+
+        tx_p["ISIN"] = tx_p["ISIN"].astype(str).str.strip()
+        courtage = pd.to_numeric(tx_p[courtage_col], errors="coerce").fillna(0.0)
+        affar = pd.to_datetime(tx_p[COL_AFFARSDAG], errors="coerce")
+        keep = (courtage != 0.0) & affar.notna() & (tx_p["ISIN"] != "")
+        if not keep.any():
+            continue
+        tx_p = tx_p[keep].copy()
+        courtage = courtage[keep]
+        affar = affar[keep]
+
+        valuta = (
+            tx_p[COL_VALUTA].astype(str).str.upper().str.strip()
+            if COL_VALUTA in tx_p.columns
+            else pd.Series(base_ccy, index=tx_p.index)
+        )
+        refx = pd.to_numeric(tx_p[COL_REFX], errors="coerce") if COL_REFX in tx_p.columns else pd.Series(np.nan, index=tx_p.index)
+        vax = pd.to_numeric(tx_p[COL_VAX], errors="coerce") if COL_VAX in tx_p.columns else pd.Series(np.nan, index=tx_p.index)
+        conversion_rate = refx.where(refx.notna(), vax)
+        is_base = valuta == base_ccy
+        needs_conversion = ~is_base
+        missing_rate = needs_conversion & conversion_rate.isna()
+        if missing_rate.any():
+            bad = tx_p.loc[missing_rate, [COL_AFFARSDAG, "ISIN", COL_VALUTA]].head(5)
+            raise ValueError(
+                f"Cannot convert Courtage to {base_ccy}: missing Referensvalutakurs/Växlingskurs "
+                f"(portfolio={portfolio_name}). Examples: {bad.to_dict(orient='records')}"
+            )
+        courtage_sek = courtage.where(is_base, courtage * conversion_rate)
+
+        frame = pd.DataFrame(
+            {
+                "Period_End_Date": (affar + pd.offsets.MonthEnd(0)).dt.normalize().values,
+                "ISIN": tx_p["ISIN"].values,
+                "Currency": valuta.values,
+                "Courtage_Native": courtage.values,
+                "Courtage_SEK": pd.to_numeric(courtage_sek, errors="coerce").values,
+            }
+        )
+        grouped = (
+            frame.groupby(["Period_End_Date", "ISIN", "Currency"], as_index=False)
+            .agg(
+                Courtage_Native=("Courtage_Native", "sum"),
+                Courtage_SEK=("Courtage_SEK", "sum"),
+                Txn_Count=("Courtage_Native", "size"),
+            )
+            .sort_values(["Period_End_Date", "ISIN", "Currency"])
+        )
+
+        series_id = f"PORT_{slug(portfolio_name)}_REAL"
+        for rec in grouped.to_dict(orient="records"):
+            isin = str(rec["ISIN"]).strip()
+            info = isin_meta.loc[isin] if isin in isin_meta.index else None
+            ticker = str(info["Yahoo_Ticker"]).strip() if info is not None else ""
+            name_val = info[name_col] if (info is not None and name_col) else None
+            if name_val is not None and pd.notna(name_val) and str(name_val).strip():
+                display = str(name_val).strip()
+            else:
+                display = ticker or isin
+            category = str(info["Category"]).strip() if info is not None else ""
+            rows.append(
+                {
+                    "Portfolio_Name": portfolio_name,
+                    "Portfolio_ID": portfolio_key,
+                    "Series_ID": series_id,
+                    "Period_End_Date": rec["Period_End_Date"],
+                    "ISIN": isin,
+                    "Yahoo_Ticker": ticker or None,
+                    "Display_Name": display or None,
+                    "Category": category or None,
+                    "Currency": rec["Currency"],
+                    "Courtage_Native": float(rec["Courtage_Native"]),
+                    "Courtage_SEK": float(rec["Courtage_SEK"]),
+                    "Txn_Count": int(rec["Txn_Count"]),
+                }
+            )
+
+    return pd.DataFrame(rows, columns=COURTAGE_COLUMNS)

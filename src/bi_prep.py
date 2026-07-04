@@ -34,6 +34,21 @@ ALLOCATION_MONTHLY_COLUMNS = [
     "Weight",
     "Weight_Source",
 ]
+COURTAGE_SHEET_NAME = "Fact_Portfolio_Courtage"
+COURTAGE_FACT_COLUMNS = [
+    "Portfolio_Key",
+    "Portfolio_Name",
+    "Series_ID",
+    "Instrument_Key",
+    "ISIN",
+    "Display_Name",
+    "Category",
+    "Period_End_Date",
+    "Currency",
+    "Courtage_Native",
+    "Courtage_SEK",
+    "Txn_Count",
+]
 TABLE_HEADER_FILL = PatternFill(fill_type="solid", fgColor="D9EAF7")
 
 
@@ -269,9 +284,46 @@ def _build_fact_series_kpi(
     return fact_kpi.sort_values(["Series_ID", "Period"]).reset_index(drop=True)[columns]
 
 
+def _attach_instrument_ter(
+    dim_instrument: pd.DataFrame,
+    instrument_cost: pd.DataFrame | None,
+) -> pd.DataFrame:
+    """Join löpande avgift (TER) på Dim_Instrument via ISIN.
+
+    TER bärs genom upstream-outputens ``Instrument_Cost``-sheet. Instrument utan
+    TER-rad (eller där Nordnet inte visade avgiften) får TER=NA och en talande
+    status, aldrig ett påhittat värde. Bakåtkompatibelt: saknas sheeten helt blir
+    kolumnerna tomma.
+    """
+    out = dim_instrument.copy()
+    if instrument_cost is None or instrument_cost.empty or "ISIN" not in instrument_cost.columns:
+        out["TER"] = pd.NA
+        out["TER_Status"] = pd.NA
+        out["TER_Source"] = pd.NA
+        return out
+
+    cost = instrument_cost.copy()
+    cost["ISIN"] = cost["ISIN"].astype(str).str.strip()
+    cost = cost[cost["ISIN"] != ""].drop_duplicates(subset=["ISIN"], keep="first")
+    cols = [c for c in ("ISIN", "TER", "TER_Status", "TER_Source") if c in cost.columns]
+
+    out["_join_isin"] = out["ISIN"].astype(str).str.strip()
+    merged = out.merge(
+        cost[cols].rename(columns={"ISIN": "_join_isin"}),
+        on="_join_isin",
+        how="left",
+    ).drop(columns=["_join_isin"])
+    merged["TER"] = pd.to_numeric(merged["TER"], errors="coerce") if "TER" in merged.columns else pd.NA
+    for column in ("TER_Status", "TER_Source"):
+        if column not in merged.columns:
+            merged[column] = pd.NA
+    return merged
+
+
 def _build_dim_instrument(
     series_definition: pd.DataFrame,
     portfolio_series_map: pd.DataFrame,
+    instrument_cost: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     map_rows = portfolio_series_map[
         ["Yahoo_Ticker", "ISIN", "Display_Name", "Price_Currency"]
@@ -319,6 +371,9 @@ def _build_dim_instrument(
                 "Category",
                 "Geography",
                 "Structure",
+                "TER",
+                "TER_Status",
+                "TER_Source",
             ]
         )
 
@@ -343,6 +398,7 @@ def _build_dim_instrument(
     for column in ("ISIN", "Display_Name", "Price_Currency", "Instrument_Type", "Category", "Geography"):
         dim_instrument[column] = _combine_optional_columns(dim_instrument, column)
     dim_instrument["Structure"] = pd.NA
+    dim_instrument = _attach_instrument_ter(dim_instrument, instrument_cost)
     return dim_instrument[
         [
             "Instrument_Key",
@@ -354,6 +410,9 @@ def _build_dim_instrument(
             "Category",
             "Geography",
             "Structure",
+            "TER",
+            "TER_Status",
+            "TER_Source",
         ]
     ]
 
@@ -445,6 +504,45 @@ def _build_fact_portfolio_alloc_monthly(
     )
 
 
+def _build_fact_portfolio_courtage(portfolio_courtage: pd.DataFrame) -> pd.DataFrame:
+    """Realiserat courtage per portfölj × månad × instrument × valuta, star-keyat.
+
+    Länkar till Dim_Portfolio (Portfolio_Key), Dim_Instrument (Instrument_Key),
+    Dim_Series (Series_ID) och Dim_Date (Period_End_Date). ``Courtage_SEK`` är den
+    rollup-säkra basvaluta-summan (redan inbakad i REAL); ``Courtage_Native`` är
+    råvärdet per valuta för avstämning mot Nordnet-exportens Courtage-kolumn.
+    """
+    if portfolio_courtage.empty:
+        return pd.DataFrame(columns=COURTAGE_FACT_COLUMNS)
+
+    df = portfolio_courtage.copy()
+    df["Portfolio_Name"] = _nullable_text(df["Portfolio_Name"])
+    df["Series_ID"] = _nullable_text(df["Series_ID"]) if "Series_ID" in df.columns else pd.NA
+    df["ISIN"] = _nullable_text(df["ISIN"])
+    df["Yahoo_Ticker"] = _nullable_text(df["Yahoo_Ticker"]) if "Yahoo_Ticker" in df.columns else pd.NA
+    df["Display_Name"] = _nullable_text(df["Display_Name"]) if "Display_Name" in df.columns else pd.NA
+    df["Category"] = _nullable_text(df["Category"]) if "Category" in df.columns else pd.NA
+    df["Currency"] = _nullable_text(df["Currency"]) if "Currency" in df.columns else pd.NA
+    df["Period_End_Date"] = pd.to_datetime(df["Period_End_Date"], errors="coerce").dt.normalize()
+    for column in ("Courtage_Native", "Courtage_SEK", "Txn_Count"):
+        df[column] = (
+            pd.to_numeric(df[column], errors="coerce")
+            if column in df.columns
+            else pd.Series(pd.NA, index=df.index, dtype="float")
+        )
+
+    df = df[df["Portfolio_Name"].notna() & df["Period_End_Date"].notna()].copy()
+    if df.empty:
+        return pd.DataFrame(columns=COURTAGE_FACT_COLUMNS)
+    df["Portfolio_Key"] = df["Portfolio_Name"]
+    df["Instrument_Key"] = df["Yahoo_Ticker"]
+    return (
+        df[COURTAGE_FACT_COLUMNS]
+        .sort_values(["Portfolio_Key", "Period_End_Date", "ISIN", "Currency"])
+        .reset_index(drop=True)
+    )
+
+
 def _add_excel_table(writer: pd.ExcelWriter, sheet_name: str, table_name: str) -> None:
     """Wrap a worksheet's used range in an Excel table for more stable Power BI navigation."""
     worksheet = writer.sheets[sheet_name]
@@ -492,7 +590,12 @@ def run(
         rf_rate_annual,
         trading_days_per_year,
     )
-    dim_instrument = _build_dim_instrument(source.series_definition, source.portfolio_series_map)
+    dim_instrument = _build_dim_instrument(
+        source.series_definition,
+        source.portfolio_series_map,
+        source.instrument_cost,
+    )
+    fact_portfolio_courtage = _build_fact_portfolio_courtage(source.portfolio_courtage)
     snapshot_date = fact_series_daily["Date"].max()
     fact_allocation_snapshot = _build_fact_portfolio_allocation_snapshot(
         source.portfolio_series_map,
@@ -525,8 +628,22 @@ def run(
     if dim_instrument.empty:
         logging.info("Dim_Instrument is empty; upstream artifact did not materialize instrument tickers")
     else:
+        ter_ok = int((dim_instrument["TER_Status"] == "ok").sum()) if "TER_Status" in dim_instrument.columns else 0
         logging.info(
-            "Dim_Instrument built from upstream ticker metadata in Series_Definition and Portfolio_Series_Map"
+            "Dim_Instrument built from upstream ticker metadata (%s instrument, %s med TER)",
+            len(dim_instrument),
+            ter_ok,
+        )
+    if fact_portfolio_courtage.empty:
+        logging.info(
+            "Fact_Portfolio_Courtage is empty; upstream workbook has no %s sheet",
+            "Portfolio_Courtage",
+        )
+    else:
+        logging.info(
+            "Fact_Portfolio_Courtage: %s rader, %.2f SEK totalt realiserat courtage",
+            len(fact_portfolio_courtage),
+            float(fact_portfolio_courtage["Courtage_SEK"].sum()),
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -547,6 +664,11 @@ def run(
             sheet_name=ALLOCATION_MONTHLY_SHEET_NAME,
             index=False,
         )
+        fact_portfolio_courtage.to_excel(
+            writer,
+            sheet_name=COURTAGE_SHEET_NAME,
+            index=False,
+        )
         _add_excel_table(writer, "Dim_Date", "Dim_Date")
         _add_excel_table(writer, "Dim_Portfolio", "Dim_Portfolio")
         _add_excel_table(writer, "Dim_Series", "Dim_Series")
@@ -563,6 +685,7 @@ def run(
             ALLOCATION_MONTHLY_SHEET_NAME,
             ALLOCATION_MONTHLY_SHEET_NAME,
         )
+        _add_excel_table(writer, COURTAGE_SHEET_NAME, COURTAGE_SHEET_NAME)
 
     logging.info("BI data workbook written: %s", output_path)
     # Väg B: bi_prep skriver bara lokal BI-output. OneDrive-kopian sköts nattligt

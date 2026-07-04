@@ -60,6 +60,26 @@ ALLOC_MONTHLY_COLUMNS = [
     "Weight_Source",
 ]
 
+# Optional cost sheets (Steg 2b). Older upstream workbooks predate them, so BI
+# degrades gracefully to empty frames when absent.
+INSTRUMENT_COST_SHEET = "Instrument_Cost"
+INSTRUMENT_COST_COLUMNS = ["ISIN", "Instrument_Type", "TER", "TER_Status", "TER_Source"]
+COURTAGE_SHEET = "Portfolio_Courtage"
+COURTAGE_COLUMNS = [
+    "Portfolio_Name",
+    "Portfolio_ID",
+    "Series_ID",
+    "Period_End_Date",
+    "ISIN",
+    "Yahoo_Ticker",
+    "Display_Name",
+    "Category",
+    "Currency",
+    "Courtage_Native",
+    "Courtage_SEK",
+    "Txn_Count",
+]
+
 
 @dataclass(frozen=True)
 class PortfolioOutputSource:
@@ -71,6 +91,8 @@ class PortfolioOutputSource:
     portfolio_series_map: pd.DataFrame
     run_config: pd.DataFrame
     portfolio_alloc_monthly: pd.DataFrame
+    instrument_cost: pd.DataFrame
+    portfolio_courtage: pd.DataFrame
 
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -133,6 +155,8 @@ def load_portfolio_output(path: str | Path) -> PortfolioOutputSource:
     run_config["TRADING_DAYS_PER_YEAR"] = pd.to_numeric(run_config["TRADING_DAYS_PER_YEAR"], errors="coerce")
 
     portfolio_alloc_monthly = _load_alloc_monthly(sheets)
+    instrument_cost = _load_instrument_cost(sheets)
+    portfolio_courtage = _load_portfolio_courtage(sheets)
 
     return PortfolioOutputSource(
         source_path=source_path,
@@ -141,6 +165,8 @@ def load_portfolio_output(path: str | Path) -> PortfolioOutputSource:
         portfolio_series_map=portfolio_series_map,
         run_config=run_config,
         portfolio_alloc_monthly=portfolio_alloc_monthly,
+        instrument_cost=instrument_cost,
+        portfolio_courtage=portfolio_courtage,
     )
 
 
@@ -162,6 +188,37 @@ def _load_alloc_monthly(sheets: dict[str, pd.DataFrame]) -> pd.DataFrame:
         if column in alloc.columns:
             alloc[column] = pd.to_numeric(alloc[column], errors="coerce")
     return alloc
+
+
+def _load_instrument_cost(sheets: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Read the optional per-instrument TER sheet, empty frame when absent."""
+    if INSTRUMENT_COST_SHEET not in sheets:
+        return pd.DataFrame(columns=INSTRUMENT_COST_COLUMNS)
+    cost = sheets[INSTRUMENT_COST_SHEET].copy()
+    _validate_columns(cost, ["ISIN", "TER", "TER_Status"], INSTRUMENT_COST_SHEET)
+    cost["ISIN"] = cost["ISIN"].astype(str).str.strip()
+    cost["TER"] = pd.to_numeric(cost["TER"], errors="coerce")
+    cost["TER_Status"] = cost["TER_Status"].astype(str).str.strip()
+    return cost
+
+
+def _load_portfolio_courtage(sheets: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Read the optional realised-courtage sheet, empty frame when absent."""
+    if COURTAGE_SHEET not in sheets:
+        return pd.DataFrame(columns=COURTAGE_COLUMNS)
+    courtage = sheets[COURTAGE_SHEET].copy()
+    _validate_columns(
+        courtage,
+        ["Portfolio_Name", "Period_End_Date", "ISIN", "Courtage_Native", "Courtage_SEK"],
+        COURTAGE_SHEET,
+    )
+    courtage["Period_End_Date"] = pd.to_datetime(courtage["Period_End_Date"], errors="coerce")
+    courtage["Portfolio_Name"] = courtage["Portfolio_Name"].astype(str).str.strip()
+    courtage["ISIN"] = courtage["ISIN"].astype(str).str.strip()
+    for column in ("Courtage_Native", "Courtage_SEK", "Txn_Count"):
+        if column in courtage.columns:
+            courtage[column] = pd.to_numeric(courtage[column], errors="coerce")
+    return courtage
 
 
 def extract_run_parameters(run_config: pd.DataFrame) -> tuple[float, int]:

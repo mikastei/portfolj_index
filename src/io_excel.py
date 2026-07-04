@@ -134,6 +134,38 @@ def _table_to_dataframe(path: str | Path, table_name: str) -> pd.DataFrame:
     raise ValueError(f"Structured table '{table_name}' not found in {path}")
 
 
+def _optional_table_to_dataframe(path: str | Path, table_name: str) -> pd.DataFrame:
+    """Läs en tabell om den finns, annars tom DataFrame. Används för tillägg som
+    kan saknas i äldre indatafiler (t.ex. usa_exposure-tabellens TER-kolumn)."""
+    try:
+        return _table_to_dataframe(path, table_name)
+    except (ValueError, KeyError, FileNotFoundError):
+        return pd.DataFrame()
+
+
+def _normalize_fund_costs(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalisera usa_exposure-tabellens kostnadskolumner till ISIN/TER/TER_Status.
+
+    TER lagras som Nordnets råa procentvärde ("Årlig avgift", t.ex. 1.55 = 1,55 %).
+    Instrument utan giltig TER får TER=NA och behåller sin status så täckningen kan
+    rapporteras – aldrig ett påhittat värde.
+    """
+    columns = ["ISIN", "TER", "TER_Status"]
+    if df.empty:
+        return pd.DataFrame(columns=columns)
+    lower = {str(c).strip().lower(): c for c in df.columns}
+    if "isin" not in lower:
+        return pd.DataFrame(columns=columns)
+    out = pd.DataFrame()
+    out["ISIN"] = df[lower["isin"]].astype(str).str.strip()
+    out["TER"] = pd.to_numeric(df[lower["ter"]], errors="coerce") if "ter" in lower else pd.NA
+    out["TER_Status"] = (
+        df[lower["ter_status"]].astype(str).str.strip() if "ter_status" in lower else pd.NA
+    )
+    out = out[out["ISIN"] != ""]
+    return out.drop_duplicates(subset=["ISIN"], keep="first").reset_index(drop=True)
+
+
 def _validate_columns(df: pd.DataFrame, required: Iterable[str], table_name: str) -> None:
     missing = [col for col in required if col not in df.columns]
     if missing:
@@ -147,6 +179,9 @@ def load_inputs(path_transaktioner: str, path_fonder: str) -> dict[str, pd.DataF
     portfolio_metadata = _table_to_dataframe(path_transaktioner, "Portfolio_Metadata")
     benchmarks = _table_to_dataframe(path_transaktioner, "Benchmarks")
     fondertabell = _table_to_dataframe(path_fonder, "Fondertabell")
+    # Löpande avgift (TER) skrapas av Fondanalys usa_exposure-jobbet till
+    # usa_exposure-tabellen i fonder.xlsx. Valfri – saknas i äldre filer.
+    fund_costs = _normalize_fund_costs(_optional_table_to_dataframe(path_fonder, "usa_exposure"))
 
     _validate_columns(
         transactions,
@@ -185,4 +220,5 @@ def load_inputs(path_transaktioner: str, path_fonder: str) -> dict[str, pd.DataF
         "portfolio_metadata": portfolio_metadata,
         "benchmarks": benchmarks,
         "fondertabell": fondertabell,
+        "fund_costs": fund_costs,
     }

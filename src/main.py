@@ -22,10 +22,16 @@ def run() -> int:
 
     from . import config
     from .io_excel import load_inputs
-    from .outputs import build_master_timeseries_long, build_run_config, write_output_excel
+    from .outputs import (
+        build_instrument_cost,
+        build_master_timeseries_long,
+        build_run_config,
+        write_output_excel,
+    )
     from .portfolio import (
         EngineInputs,
         build_portfolio_alloc_monthly,
+        build_portfolio_courtage,
         build_portfolio_series_map,
         build_portfolios_and_benchmarks,
         build_series_definition,
@@ -113,6 +119,13 @@ def run() -> int:
         prices,
         base_currency=config.BASE_CURRENCY,
     )
+    instrument_cost = build_instrument_cost(tables["mapping"], tables["fund_costs"])
+    portfolio_courtage = build_portfolio_courtage(
+        tables["portfolio_metadata"],
+        tables["transactions"],
+        tables["mapping"],
+        base_currency=config.BASE_CURRENCY,
+    )
     master_long = build_master_timeseries_long(series_map)
     run_config = build_run_config(
         path_transaktioner=config.PATH_TRANSAKTIONER,
@@ -131,6 +144,19 @@ def run() -> int:
         master_long=master_long,
         run_config=run_config,
         portfolio_alloc_monthly=portfolio_alloc_monthly,
+        instrument_cost=instrument_cost,
+        portfolio_courtage=portfolio_courtage,
+    )
+
+    logging.info(
+        "Instrument_Cost: %s instrument, TER-täckning %s ok",
+        len(instrument_cost),
+        int((instrument_cost["TER_Status"] == "ok").sum()) if not instrument_cost.empty else 0,
+    )
+    logging.info(
+        "Portfolio_Courtage: %s rader, totalt %.2f SEK realiserat courtage",
+        len(portfolio_courtage),
+        float(portfolio_courtage["Courtage_SEK"].sum()) if not portfolio_courtage.empty else 0.0,
     )
 
     bm_count = sum(1 for sid in series_map if sid.startswith("BM_"))
