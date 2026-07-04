@@ -22,9 +22,10 @@ KPI_COLUMNS = ["Return_Total", "CAGR", "Vol", "Sharpe", "Sortino", "Max_DD", "Ca
 ABS_TOLERANCE = 1e-9
 REL_TOLERANCE = 1e-6
 
-# Kända nivåer per 2026-07-03 (REAL-datakvaliteten åtgärdad). Avviker slutindex
-# mer än toleransen ska rapporten inte byggas alls.
-REAL_ANCHORS = {"PORT_PA_REAL": 125.9, "PORT_EGEN_REAL": 120.5}
+# Kända nivåer per 2026-07-03, avlästa ur BI-filen byggd 2026-07-04 (sena
+# fond-NAV:er reviderade EGEN från 120,5 till 121,3 mellan byggena 3 och 4 juli).
+# Avviker slutindex mer än toleransen ska rapporten inte byggas alls.
+REAL_ANCHORS = {"PORT_PA_REAL": 125.9, "PORT_EGEN_REAL": 121.3}
 ANCHOR_TOLERANCE = 0.5
 
 
