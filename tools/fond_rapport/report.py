@@ -817,8 +817,9 @@ tal i rapporten är beräknade ur källfilen – inget är uppskattat.</p>
 <h2>1. Index: EGEN mot PA och referenser</h2>
 <p>EGEN (blå) mäts mot PA (röd) – referensportföljen som ska slås – samt externa
 blandfondsreferenser, allt rebaserat till 100 vid EGEN:s inception. CUR och TGT är
-statiska buy-and-hold-referenser av den <em>nuvarande</em> fondlistan respektive
-målvikterna, bakåtprojicerade – se förbehållen i avsnitt 6.2 innan gapet tolkas.</p>
+konstantviktade referenser, dagligen ombalanserade till fasta vikter (nuvarande
+fondlista resp. målvikter), bakåtprojicerade – se förbehållen i avsnitt 6.2 innan
+gapet tolkas.</p>
 {headline}
 {index_sections}
 
