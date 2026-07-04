@@ -12,6 +12,7 @@ import html
 import pandas as pd
 
 from . import charts
+from .attribution import TOP_N_FUNDS, PortfolioAttribution
 from .data import BIData, series_index
 from .verify import VerificationResult
 
@@ -19,11 +20,11 @@ PORTFOLIOS = ["PA", "EGEN"]
 
 SERIES_LABELS = {
     "PORT_PA_REAL": "PA – Verklig portfölj (REAL)",
-    "PORT_PA_CUR": "PA – Nuvarande fondlista, buy &amp; hold (CUR)",
-    "PORT_PA_TGT": "PA – Målvikter, buy &amp; hold (TGT)",
+    "PORT_PA_CUR": "PA – Nuvarande fondlista, konstantviktad (CUR)",
+    "PORT_PA_TGT": "PA – Målvikter, konstantviktad (TGT)",
     "PORT_EGEN_REAL": "EGEN – Verklig portfölj (REAL)",
-    "PORT_EGEN_CUR": "EGEN – Nuvarande fondlista, buy &amp; hold (CUR)",
-    "PORT_EGEN_TGT": "EGEN – Målvikter, buy &amp; hold (TGT)",
+    "PORT_EGEN_CUR": "EGEN – Nuvarande fondlista, konstantviktad (CUR)",
+    "PORT_EGEN_TGT": "EGEN – Målvikter, konstantviktad (TGT)",
     "BM_BM_NORDNET_BALANSERAD": "Nordnet Balanserad",
     "BM_BM_NORDNET_OFFENSIV": "Nordnet Offensiv",
     "BM_BM_OMX_STOCKHOLM_GI": "OMX Stockholm GI",
@@ -310,7 +311,7 @@ def _interpretation_section(data: BIData) -> str:
     pa_best = pa["categories"].iloc[0]
 
     return f"""
-<h3>5.1 Vad siffrorna visar</h3>
+<h3>6.1 Vad siffrorna visar</h3>
 {gap_text(pa, "PA")}
 {gap_text(egen, "EGEN")}
 <p>Kategorimässigt (deskriptivt): i EGEN drog
@@ -320,9 +321,9 @@ medan <strong>{html.escape(egen_worst['Kategori'])}</strong>
 I PA var <strong>{html.escape(pa_best['Kategori'])}</strong> ({fmt_pct(pa_best['Ret_Since'])})
 starkast.</p>
 
-<h3>5.2 Hur REAL-vs-CUR/TGT-gapet får – och inte får – tolkas</h3>
-<p>CUR och TGT är <em>statiska buy-and-hold-portföljer av den nuvarande fondlistan,
-bakåtprojicerade</em> över hela perioden. Listan är vald med facit i hand: fonder som
+<h3>6.2 Hur REAL-vs-CUR/TGT-gapet får – och inte får – tolkas</h3>
+<p>CUR och TGT är <em>konstantviktade (dagligen rebalanserade) portföljer av den
+nuvarande fondlistan, bakåtprojicerade</em> över hela perioden. Listan är vald med facit i hand: fonder som
 åkt ut ur portföljen under resan ingår inte, och fonder som köpts in sent får i
 CUR/TGT tillgodoräkna sig hela periodens uppgång. Det ger survivorship- och
 look-ahead-bias i referensens favör. <strong>Gapet REAL−CUR/TGT är därför inte ett
@@ -341,16 +342,12 @@ inte uppenbart förstört värde relativt sin egen nuvarande lista, med reservat
 även den jämförelsen bär samma bias. (3) För EGEN är den realiserade resan kraftigt
 svagare än backprojektionen av sin egen lista – ett tydligt <em>underlag för vidare
 analys</em>, inte en dom.</p>
-<p><strong>Vad som INTE kan besvaras med nuvarande fil (Steg 2 – kräver historiska
-vikter över tid samt TER per fond):</strong></p>
-<ul>
-<li>Brinson-attribution: kommer gapet från allokering eller fondselektion?</li>
-<li>Rebalansering mot slump: har omviktningarna tillfört eller kostat?</li>
-<li>Strukturell avgiftsmotvind: hur mycket förklarar avgifterna?</li>
-<li>Koncentrationsberoende: drivs eventuell över-/underavkastning av en enda position?</li>
-</ul>
+<p><strong>Vad som nu besvaras respektive återstår:</strong> Brinson-attributionen,
+rebalansering-mot-slump-testet och koncentrationsanalysen finns i avsnitt 5, byggda på
+de historiska månadsvikterna (Steg 2a). Det som återstår är den strukturella
+avgiftsmotvinden – den kräver TER per fond (Steg 2b) och kvantifieras inte här.</p>
 
-<h3>5.3 Pilotens metafråga och rekommendation</h3>
+<h3>6.3 Pilotens metafråga och rekommendation</h3>
 <p>Ger den här rapporten beslutsvärde utöver Power BI? Bedömning: <strong>ja, men på
 tolknings- och verifieringslagret snarare än på siffrorna</strong>. Kurvorna och
 KPI-tabellerna finns redan i Power BI. Det rapporten tillför är (1) en oberoende
@@ -358,12 +355,234 @@ omräkning av samtliga KPI:er ur dagsserierna med redovisad tolerans, (2) explic
 bias-hantering – Power BI visar gapet men förklarar inte varför det inte får läsas som
 skicklighet, och (3) ett reproducerbart, versionerat underlag som kan byggas om vid
 varje datauppdatering.</p>
-<p><strong>Rekommendation: fortsätt, med justerat scope.</strong> Rapportens största
-begränsning är inte motorn utan datat: utan historiska vikter och TER går det inte att
-attribuera EGEN-gapet, och det är den frågan som har störst beslutsvärde för
-metodiken. Prioritera därför Steg 2-datat (historiska vikter över tid + TER per fond)
-före fler visualiseringar. Behåll Power BI för löpande överblick; låt det här spåret
-äga fördjupning, attribution och verifiering.</p>
+<p><strong>Rekommendation: fortsätt, med justerat scope.</strong> Med Steg 2a-vikterna
+på plats attribuerar avsnitt 5 nu gapet mekaniskt (allokering/selektion/koncentration).
+Den kvarvarande dataluckan med störst beslutsvärde är TER per fond (Steg 2b) – utan den
+går den strukturella avgiftsmotvinden inte att skilja från selektionstermen. Behåll
+Power BI för löpande överblick; låt det här spåret äga fördjupning, attribution och
+verifiering.</p>
+"""
+
+
+def _attribution_portfolio_section(attr: PortfolioAttribution) -> str:
+    """Sektion 5 för en portfölj: dekomponering, slumptest, koncentration."""
+    effects = attr.effects_by_category.copy()
+    effects["Summa"] = effects.sum(axis=1)
+    body = "".join(
+        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+            html.escape(str(category)),
+            fmt_pp(row["Allokering"], 2),
+            fmt_pp(row["Selektion"], 2),
+            fmt_pp(row["Interaktion"], 2),
+            fmt_pp(row["Summa"], 2),
+        )
+        for category, row in effects.iterrows()
+    )
+    totals_row = (
+        f"<tr class=\"real-row\"><td>Summa</td><td>{fmt_pp(attr.allocation_total, 2)}</td>"
+        f"<td>{fmt_pp(attr.selection_total, 2)}</td>"
+        f"<td>{fmt_pp(attr.interaction_total, 2)}</td>"
+        f"<td>{fmt_pp(attr.allocation_total + attr.selection_total + attr.interaction_total, 2)}</td></tr>"
+    )
+    effects_table = (
+        "<table><thead><tr><th>Kategori</th><th>Allokering/timing</th><th>Selektion</th>"
+        f"<th>Interaktion</th><th>Summa</th></tr></thead><tbody>{body}{totals_row}</tbody></table>"
+    )
+
+    reconciliation = (
+        f"<p>Aktiv avkastning REAL−TGT i attributionsfönstret "
+        f"({attr.window_start.date()} – {attr.window_end.date()}, {attr.n_months} månader): "
+        f"<strong>{fmt_pp(attr.active_window, 2)}</strong> "
+        f"(REAL {fmt_pct(attr.r_real_window)} mot TGT {fmt_pct(attr.r_ref_window)}). "
+        f"Komponenter: allokering/timing {fmt_pp(attr.allocation_total, 2)}, "
+        f"selektion {fmt_pp(attr.selection_total, 2)}, "
+        f"interaktion {fmt_pp(attr.interaction_total, 2)}, "
+        f"residual REAL (intra-månadsflöden) {fmt_pp(attr.residual_real, 2)}, "
+        f"residual TGT (daglig rebalansering) {fmt_pp(attr.residual_ref, 2)}. "
+        f"Kontrollsumma mot aktiv avkastning: residual {attr.decomposition_residual:.2e}. "
+        f"Sedan seriestart är den aktiva avkastningen {fmt_pp(attr.active_since_start, 2)}; "
+        f"skillnaden mot fönstret, {fmt_pp(attr.pre_window_effect, 2)}, uppstod "
+        f"<em>före</em> första månadsvikten (perioden innan portföljen var fullt "
+        f"investerad, då bakåtprojicerade TGT redan var det).</p>"
+    )
+
+    perm_conclusion = (
+        "statistiskt skiljbar från slump"
+        if attr.perm_p_two_sided < 0.05
+        else "inte statistiskt skiljbar från slump"
+    )
+    perm = (
+        f"<p><strong>Rebalansering mot slump:</strong> den aritmetiska allokerings-/"
+        f"timingeffekten är {fmt_pp(attr.perm_statistic, 2)}. Under nollhypotesen att "
+        f"viktbanans <em>tidsordning</em> är slumpmässig (permutation av månadsvikternas "
+        f"ordning, N&nbsp;=&nbsp;{attr.perm_n}, fast seed) blir effekten i medel "
+        f"{fmt_pp(attr.perm_null_mean, 2)} med standardavvikelse "
+        f"{fmt_pp(attr.perm_null_std, 2)}. Den faktiska banan ligger på percentil "
+        f"{fmt_num(attr.perm_percentile * 100.0, 1)} och tvåsidigt p-värde "
+        f"{fmt_num(attr.perm_p_two_sided, 3)} – <strong>{perm_conclusion}</strong>. "
+        f"Testet isolerar timingen: nivån på snedvridningarna hålls konstant, bara "
+        f"ordningen slumpas.</p>"
+    )
+
+    top = attr.fund_contributions.head(TOP_N_FUNDS)
+    other = attr.fund_contributions.iloc[TOP_N_FUNDS:]
+    fund_rows = "".join(
+        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+            html.escape(str(row["Fond"])),
+            html.escape(str(row["Kategori"])),
+            fmt_pp(row["C_real"], 2),
+            fmt_pp(row["C_ref"], 2),
+            fmt_pp(row["Gap"], 2),
+        )
+        for _, row in top.iterrows()
+    )
+    if not other.empty:
+        fund_rows += (
+            f"<tr><td>Övriga {len(other)} fonder</td><td>–</td>"
+            f"<td>{fmt_pp(other['C_real'].sum(), 2)}</td>"
+            f"<td>{fmt_pp(other['C_ref'].sum(), 2)}</td>"
+            f"<td>{fmt_pp(other['Gap'].sum(), 2)}</td></tr>"
+        )
+    fund_rows += (
+        f"<tr><td>Residualer (flöden/rebalansering)</td><td>–</td>"
+        f"<td>{fmt_pp(attr.fund_residual_real, 2)}</td>"
+        f"<td>{fmt_pp(attr.fund_residual_ref, 2)}</td>"
+        f"<td>{fmt_pp(attr.fund_residual_real - attr.fund_residual_ref, 2)}</td></tr>"
+    )
+    fund_table = (
+        "<table><thead><tr><th>Fond</th><th>Kategori</th><th>Bidrag REAL</th>"
+        "<th>Bidrag TGT</th><th>Gapbidrag</th></tr></thead>"
+        f"<tbody>{fund_rows}</tbody></table>"
+    )
+    concentration = (
+        f"<p><strong>Koncentration:</strong> de tre största gapbidragen (absolutbelopp) "
+        f"står för {fmt_pct(attr.gap_top3_share)} av summan av alla gapbidrags "
+        f"absolutbelopp. Bidragen är Carino-länkade så att de summerar till respektive "
+        f"series totalavkastning i fönstret; REAL-bidragen bygger på månadsvikter × "
+        f"fondavkastning och intra-månadsflöden hamnar i residualraden.</p>"
+    )
+
+    effects_png = charts.attribution_chart(
+        attr.effects_by_category,
+        f"{attr.portfolio}: Brinson-Fachler mot TGT, länkade effekter per kategori",
+    )
+    gap_png = charts.signed_barh_chart(
+        top.set_index("Fond")["Gap"],
+        f"{attr.portfolio}: största fondbidrag till gapet REAL−TGT",
+        "Gapbidrag (procentenheter)",
+    )
+
+    components = {
+        "allokering/timing": attr.allocation_total,
+        "selektion (inom kategori, mot dagens lista)": attr.selection_total,
+        "interaktion": attr.interaction_total,
+    }
+    dominant_name = max(components, key=lambda name: abs(components[name]))
+    concentration_verdict = (
+        "buret av ett fåtal positioner"
+        if attr.gap_top3_share >= 0.5
+        else "brett fördelat över listan, inte buret av enstaka positioner"
+    )
+    survivorship_note = (
+        " Observera att selektionstermen är den komponent där survivorship-biasen "
+        "slår hårdast: referensens inom-kategori-mix är dagens behållna fonder."
+        if dominant_name.startswith("selektion")
+        else ""
+    )
+    reading = (
+        f"<p><strong>Läsning:</strong> största komponent i fönstret är "
+        f"<strong>{dominant_name}</strong> ({fmt_pp(components[dominant_name], 2)}). "
+        f"Viktbanans tidsordning är {perm_conclusion} (p = "
+        f"{fmt_num(attr.perm_p_two_sided, 3)}); nollfördelningens medelvärde "
+        f"({fmt_pp(attr.perm_null_mean, 2)}) visar vad snedvridningarnas <em>struktur</em> "
+        f"kostar oavsett ordning, och avståndet till den faktiska effekten "
+        f"({fmt_pp(attr.perm_statistic - attr.perm_null_mean, 2)}) är timingens bidrag "
+        f"utöver strukturen. Gapet är {concentration_verdict} "
+        f"(topp-3-andel {fmt_pct(attr.gap_top3_share)}).{survivorship_note}</p>"
+    )
+
+    flags_html = "".join(f"<li>{html.escape(flag)}</li>" for flag in attr.flags)
+    return (
+        f"<h3>{attr.portfolio}</h3>"
+        f"{reconciliation}"
+        f'<img src="data:image/png;base64,{effects_png}" alt="Attribution {attr.portfolio}">'
+        f"{effects_table}"
+        f"{perm}"
+        f"{concentration}"
+        f"{reading}"
+        f'<img src="data:image/png;base64,{gap_png}" alt="Gapbidrag {attr.portfolio}">'
+        f"{fund_table}"
+        f'<div class="warn"><ul>{flags_html}</ul></div>'
+    )
+
+
+def _attribution_section(attributions: dict[str, PortfolioAttribution] | None) -> str:
+    if not attributions:
+        return (
+            '<div class="warn"><p>Attributionen kunde inte beräknas: prismatrisen '
+            "(data/cache_prices.parquet) saknas. Kör upstream-pipelinen så att cachen "
+            "skapas, och bygg om rapporten.</p></div>"
+        )
+    method = """
+<p><strong>Metod och referensval.</strong> Referensportfölj är <strong>TGT</strong>
+(målvikterna, kolumn AndelP): det är den uttalade policyn och därmed den korrekta
+Brinson-referensen – aktiv avkastning mäter då avvikelser från den egna planen. CUR
+är dagens faktiska mix bakåtprojicerad (en driftad ögonblicksbild, ingen policy) och
+används inte som referens. Dekomponeringen är Brinson-Fachler per kalendermånad på
+kategorinivå: <em>allokering/timing</em> = (REAL-vikt − TGT-vikt) × (TGT-kategoriavkastning
+− TGT-total), <em>selektion</em> = TGT-vikt × (REAL-kategoriavkastning −
+TGT-kategoriavkastning), <em>interaktion</em> = viktavvikelse × avkastningsavvikelse.
+Månadseffekterna länkas med Carino-metoden så att komponenterna summerar exakt till
+fönstrets aktiva avkastning; kontrollsumman redovisas per portfölj.</p>
+<p><strong>Datakällor.</strong> REAL-vikterna kommer ur
+<code>Fact_Portfolio_Alloc_Monthly</code> (Steg 2a) och REAL-kategoriavkastningarna är
+ankrade i REAL_CAT-seriernas indexnivåer – inga nya REAL-beräkningar görs. TGT:s
+kategoriavkastningar finns inte i BI-filen; de replikeras ur samma prismatris som
+pipelinen använder (<code>data/cache_prices.parquet</code>, forward-fylld, SEK-konverterad
+med samma FX-logik). Replikeringen verifieras mot TGT-seriens IDX i BI-filen innan den
+används – maximal avvikelse redovisas i bilagan.</p>
+<p><strong>Vad selektionstermen är – och inte är.</strong> Selektion mäts här
+<em>inom samma fonduniversum</em>: REAL:s faktiska inom-kategori-utfall mot TGT:s
+konstantviktade mix av dagens lista. Selektion mot <em>externa marknadsindex</em> per
+kategori kräver en entydig indexmappning per kategori; BI-filen har kategoriindex för
+tre av kategorierna (ACWI, EEM, AGG – och två kandidater för Breda fonder) men saknar
+index för Småbolag &amp; Faktorfonder och Tematiska &amp; Sektorfonder. Den analysen
+räknas därför inte alls här, i stället för att räknas orent.</p>
+"""
+    sections = "".join(
+        _attribution_portfolio_section(attributions[p])
+        for p in PORTFOLIOS
+        if p in attributions
+    )
+    return method + sections
+
+
+def _attribution_verification_section(
+    attributions: dict[str, PortfolioAttribution] | None,
+) -> str:
+    if not attributions:
+        return ""
+    rows = "".join(
+        f"<tr><td>{attr.portfolio}</td>"
+        f"<td>{attr.replication_max_diff:.2e}</td>"
+        f"<td>{attr.decomposition_residual:.2e}</td>"
+        f"<td>{fmt_pp(attr.max_abs_e_real, 2)}</td>"
+        f"<td>{fmt_pp(attr.max_abs_e_ref, 2)}</td>"
+        f"<td>{attr.zero_weight_cells}</td></tr>"
+        for attr in attributions.values()
+    )
+    return f"""
+<h4>Attributionens kontrollvärden</h4>
+<p>Replikering: TGT-serien återskapas ur priscachen och jämförs mot BI-seriens IDX
+(maskinexakt förväntas). Kontrollsumman är komponenternas summa minus aktiv avkastning
+efter Carino-länkning (ska vara maskineps). Identitetsresidualerna e är största
+månatliga avvikelse mellan seriens totalavkastning och viktade kategoriavkastningar –
+för REAL fångar den intra-månadsflöden, för TGT den dagliga rebalanseringen; båda ingår
+som redovisade komponenter i dekomponeringen, inte som fel.</p>
+<table><thead><tr><th>Portfölj</th><th>Replikering max|ΔIDX|</th>
+<th>Kontrollsumma</th><th>max |e_REAL|/mån</th><th>max |e_TGT|/mån</th>
+<th>Kategorimånader utan REAL-innehav</th></tr></thead>
+<tbody>{rows}</tbody></table>
 """
 
 
@@ -427,7 +646,12 @@ tr.real-row { background: #e8eefb; font-weight: 600; }
 """
 
 
-def build_html(data: BIData, verification: VerificationResult, contract_failures: list[str]) -> str:
+def build_html(
+    data: BIData,
+    verification: VerificationResult,
+    contract_failures: list[str],
+    attributions: dict[str, PortfolioAttribution] | None = None,
+) -> str:
     """Sätt ihop hela rapporten till en självbärande HTML-sträng."""
     daily = data.fact_daily
     start_date = daily["Date"].min().date()
@@ -477,15 +701,19 @@ Brinson). Läs tabellerna deskriptivt.</p></div>
 {category_sections}
 
 <h2>4. Aktuell allokering (snapshot)</h2>
-<p>Vikterna avser <em>ett</em> datum. Historiska vikter över tid finns inte i
-BI-filen och ingår i Steg 2.</p>
+<p>Vikterna avser <em>ett</em> datum; den historiska viktbanan
+(Fact_Portfolio_Alloc_Monthly, Steg 2a) används i attributionen i avsnitt 5.</p>
 {allocation_sections}
 
-<h2>5. Tolkning och metodikbedömning</h2>
+<h2>5. Attribution – varifrån kommer gapet mot den egna listan?</h2>
+{_attribution_section(attributions)}
+
+<h2>6. Tolkning och metodikbedömning</h2>
 {_interpretation_section(data)}
 
 <h2>Bilaga: Självverifiering</h2>
 {_verification_section(verification, contract_failures)}
+{_attribution_verification_section(attributions)}
 </body>
 </html>
 """

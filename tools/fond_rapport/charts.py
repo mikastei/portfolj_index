@@ -70,6 +70,51 @@ def category_chart(series: list[tuple[str, pd.Series]], title: str) -> str:
     return _fig_to_base64(fig)
 
 
+EFFECT_COLORS = {"Allokering": "#1f4e9c", "Selektion": "#e07b39", "Interaktion": "#999999"}
+
+
+def attribution_chart(effects: pd.DataFrame, title: str) -> str:
+    """Grupperade staplar: länkade effekter (p.e.) per kategori och komponent."""
+    categories = list(effects.index)
+    columns = list(effects.columns)
+    x = range(len(categories))
+    width = 0.8 / len(columns)
+    fig, ax = plt.subplots(figsize=(9.0, 4.2))
+    for i, column in enumerate(columns):
+        offsets = [xi + (i - (len(columns) - 1) / 2) * width for xi in x]
+        ax.bar(
+            offsets,
+            effects[column].values * 100.0,
+            width=width,
+            label=column,
+            color=EFFECT_COLORS.get(column, "#4aa0b0"),
+            alpha=0.9,
+        )
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(categories, fontsize=8, rotation=15, ha="right")
+    ax.axhline(0.0, color="#333333", linewidth=0.7)
+    ax.set_title(title, fontsize=11)
+    ax.set_ylabel("Bidrag (procentenheter)", fontsize=9)
+    ax.grid(True, axis="y", linewidth=0.4, alpha=0.5)
+    ax.tick_params(labelsize=8)
+    ax.legend(fontsize=8)
+    return _fig_to_base64(fig)
+
+
+def signed_barh_chart(values: pd.Series, title: str, xlabel: str) -> str:
+    """Horisontella staplar med tecken (negativa röda, positiva blå)."""
+    ordered = values.sort_values()
+    colors = ["#b04a4a" if v < 0 else "#1f4e9c" for v in ordered.values]
+    fig, ax = plt.subplots(figsize=(9.0, 0.35 * len(ordered) + 1.0))
+    ax.barh(ordered.index, ordered.values * 100.0, color=colors, alpha=0.85)
+    ax.axvline(0.0, color="#333333", linewidth=0.7)
+    ax.set_title(title, fontsize=11)
+    ax.set_xlabel(xlabel, fontsize=9)
+    ax.grid(True, axis="x", linewidth=0.4, alpha=0.5)
+    ax.tick_params(labelsize=8)
+    return _fig_to_base64(fig)
+
+
 def allocation_chart(weights: pd.Series, title: str) -> str:
     """Horisontella staplar för viktsnapshot, sorterade störst först."""
     ordered = weights.sort_values()

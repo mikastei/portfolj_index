@@ -15,6 +15,7 @@ SHEET_NAMES = [
     "Fact_Series_Daily",
     "Fact_Series_KPI",
     "Fact_Portfolio_Alloc_Snapshot",
+    "Fact_Portfolio_Alloc_Monthly",
 ]
 
 WEIGHT_SUM_TOLERANCE = 1e-6
@@ -31,6 +32,7 @@ class BIData:
     fact_daily: pd.DataFrame
     fact_kpi: pd.DataFrame
     fact_alloc: pd.DataFrame
+    fact_alloc_monthly: pd.DataFrame
 
 
 def load_bi_data(path: Path) -> BIData:
@@ -49,6 +51,9 @@ def load_bi_data(path: Path) -> BIData:
     fact_daily["Date"] = pd.to_datetime(fact_daily["Date"])
     fact_daily = fact_daily.sort_values(["Series_ID", "Date"]).reset_index(drop=True)
 
+    alloc_monthly = frames["Fact_Portfolio_Alloc_Monthly"].copy()
+    alloc_monthly["Period_End_Date"] = pd.to_datetime(alloc_monthly["Period_End_Date"])
+
     return BIData(
         dim_date=frames["Dim_Date"],
         dim_portfolio=frames["Dim_Portfolio"],
@@ -57,6 +62,7 @@ def load_bi_data(path: Path) -> BIData:
         fact_daily=fact_daily,
         fact_kpi=frames["Fact_Series_KPI"],
         fact_alloc=frames["Fact_Portfolio_Alloc_Snapshot"],
+        fact_alloc_monthly=alloc_monthly,
     )
 
 
@@ -68,6 +74,7 @@ def check_contract(data: BIData) -> list[str]:
         ("Fact_Series_Daily", data.fact_daily),
         ("Fact_Series_KPI", data.fact_kpi),
         ("Fact_Portfolio_Alloc_Snapshot", data.fact_alloc),
+        ("Fact_Portfolio_Alloc_Monthly", data.fact_alloc_monthly),
     ):
         nan_counts = frame.isna().sum()
         nan_columns = nan_counts[nan_counts > 0]
@@ -80,6 +87,16 @@ def check_contract(data: BIData) -> list[str]:
             failures.append(
                 f"Viktsumma avviker från 1.0 för {portfolio}/{series_id}: {total:.8f}"
             )
+
+    monthly_sums = data.fact_alloc_monthly.groupby(["Portfolio_Key", "Period_End_Date"])[
+        "Weight"
+    ].sum()
+    off = monthly_sums[(monthly_sums - 1.0).abs() > WEIGHT_SUM_TOLERANCE]
+    for (portfolio, period_end), total in off.items():
+        failures.append(
+            f"Månadsviktsumma avviker från 1.0 för {portfolio} per "
+            f"{pd.Timestamp(period_end).date()}: {total:.8f}"
+        )
 
     return failures
 

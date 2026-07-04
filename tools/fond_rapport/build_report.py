@@ -16,7 +16,9 @@ import sys
 from pathlib import Path
 
 from src.config import BASE_DIR, BI_DATA_OUTPUT_PATH
+from src.prices import CACHE_PATH
 
+from .attribution import run_attribution
 from .data import check_contract, load_bi_data
 from .report import build_html
 from .verify import verify_kpis
@@ -35,6 +37,12 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=BASE_DIR / "reports",
         help="Katalog för rapportfilen (default: reports/ i projektroten).",
+    )
+    parser.add_argument(
+        "--price-cache",
+        type=Path,
+        default=BASE_DIR / CACHE_PATH,
+        help="Prismatris (parquet) för attributionens fondnivå (default: pipelinens cache).",
     )
     args = parser.parse_args(argv)
 
@@ -62,7 +70,27 @@ def main(argv: list[str] | None = None) -> int:
         deviating = verification.kpi_comparison[~verification.kpi_comparison["OK"]]
         print(deviating.to_string(index=False), file=sys.stderr)
 
-    html_text = build_html(data, verification, contract_failures)
+    if args.price_cache.exists():
+        attributions = run_attribution(data, args.price_cache)
+        for portfolio, attr in attributions.items():
+            print(
+                f"Attribution {portfolio}: aktiv {attr.active_window * 100:+.2f} p.e. = "
+                f"allokering {attr.allocation_total * 100:+.2f} "
+                f"+ selektion {attr.selection_total * 100:+.2f} "
+                f"+ interaktion {attr.interaction_total * 100:+.2f} "
+                f"+ residualer {(attr.residual_real + attr.residual_ref) * 100:+.2f} "
+                f"(kontrollsumma {attr.decomposition_residual:.2e}, "
+                f"replikering {attr.replication_max_diff:.2e})"
+            )
+    else:
+        attributions = None
+        print(
+            f"VARNING: prismatris saknas ({args.price_cache}) – attributionsavsnittet "
+            "byggs utan beräkning.",
+            file=sys.stderr,
+        )
+
+    html_text = build_html(data, verification, contract_failures, attributions)
 
     end_date = data.fact_daily["Date"].max().date()
     args.output_dir.mkdir(parents=True, exist_ok=True)
