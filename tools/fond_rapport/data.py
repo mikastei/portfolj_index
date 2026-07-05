@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
@@ -16,6 +16,7 @@ SHEET_NAMES = [
     "Fact_Series_KPI",
     "Fact_Portfolio_Alloc_Snapshot",
     "Fact_Portfolio_Alloc_Monthly",
+    "Fact_Portfolio_Courtage",
 ]
 
 WEIGHT_SUM_TOLERANCE = 1e-6
@@ -33,6 +34,7 @@ class BIData:
     fact_kpi: pd.DataFrame
     fact_alloc: pd.DataFrame
     fact_alloc_monthly: pd.DataFrame
+    fact_courtage: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def load_bi_data(path: Path) -> BIData:
@@ -54,6 +56,9 @@ def load_bi_data(path: Path) -> BIData:
     alloc_monthly = frames["Fact_Portfolio_Alloc_Monthly"].copy()
     alloc_monthly["Period_End_Date"] = pd.to_datetime(alloc_monthly["Period_End_Date"])
 
+    courtage = frames["Fact_Portfolio_Courtage"].copy()
+    courtage["Period_End_Date"] = pd.to_datetime(courtage["Period_End_Date"])
+
     return BIData(
         dim_date=frames["Dim_Date"],
         dim_portfolio=frames["Dim_Portfolio"],
@@ -63,6 +68,7 @@ def load_bi_data(path: Path) -> BIData:
         fact_kpi=frames["Fact_Series_KPI"],
         fact_alloc=frames["Fact_Portfolio_Alloc_Snapshot"],
         fact_alloc_monthly=alloc_monthly,
+        fact_courtage=courtage,
     )
 
 
@@ -75,6 +81,7 @@ def check_contract(data: BIData) -> list[str]:
         ("Fact_Series_KPI", data.fact_kpi),
         ("Fact_Portfolio_Alloc_Snapshot", data.fact_alloc),
         ("Fact_Portfolio_Alloc_Monthly", data.fact_alloc_monthly),
+        ("Fact_Portfolio_Courtage", data.fact_courtage),
     ):
         nan_counts = frame.isna().sum()
         nan_columns = nan_counts[nan_counts > 0]

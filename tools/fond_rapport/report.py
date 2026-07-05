@@ -16,6 +16,7 @@ import pandas as pd
 
 from . import charts
 from .attribution import TOP_N_FUNDS, PortfolioAttribution
+from .costs import CostsResult
 from .data import BIData, series_index
 from .metrics import KPI_COLUMNS as METRIC_KPIS
 from .verify import VerificationResult
@@ -381,8 +382,244 @@ def _allocation_section(data: BIData, portfolio: str) -> str:
     )
 
 
+def _costs_section(costs: CostsResult, kpi: pd.DataFrame) -> str:
+    """Sektion 6: löpande avgift (TER), avgiftsdekomponering och courtage."""
+    shown = kpi.set_index(["Series_ID", "Period"])
+
+    def since(series_id: str) -> float:
+        return float(shown.loc[(series_id, "Since_Start"), "Return_Total"])
+
+    egen, pa = costs.ter["EGEN"], costs.ter["PA"]
+
+    # --- 6.1: tidsviktad TER och dagens listor ---------------------------------
+    ter_chart = charts.line_chart(
+        [
+            ("EGEN – viktad TER på täckt vikt", egen.monthly["TER_Renorm"] * 100.0, "EGEN"),
+            ("PA – viktad TER på täckt vikt", pa.monthly["TER_Renorm"] * 100.0, "PA"),
+        ],
+        "Viktad TER per periodslut (renormaliserad på täckt vikt)",
+        "TER (%/år)",
+    )
+    tw_rows = "".join(
+        f"<tr><td>{p.portfolio}</td><td>{fmt_pct(p.ter_tw_renorm, 2)}</td>"
+        f"<td>{fmt_pct(p.ter_tw_lower, 2)}</td><td>{fmt_pct(p.coverage_tw)}</td>"
+        f"<td>{p.uncovered_periods}</td></tr>"
+        for p in (egen, pa)
+    )
+    tw_table = (
+        "<table><thead><tr><th>Portfölj</th><th>Tidsviktad TER (täckt vikt)</th>"
+        "<th>Undre gräns (otäckt := 0)</th><th>Dagviktad täckning</th>"
+        "<th>Periodslut utan täckning</th></tr></thead>"
+        f"<tbody>{tw_rows}</tbody></table>"
+    )
+    snap_rows = "".join(
+        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+            p.portfolio,
+            fmt_pct(p.snapshot_ter.get("REAL", float("nan")), 2),
+            fmt_pct(p.snapshot_ter.get("CUR", float("nan")), 2),
+            fmt_pct(p.snapshot_ter.get("TGT", float("nan")), 2),
+        )
+        for p in (egen, pa)
+    )
+    snap_table = (
+        "<table><thead><tr><th>Portfölj</th><th>REAL i dag</th><th>CUR</th><th>TGT</th>"
+        f"</tr></thead><tbody>{snap_rows}</tbody></table>"
+    )
+
+    monthly = pd.concat(
+        [egen.monthly.add_prefix("EGEN_"), pa.monthly.add_prefix("PA_")], axis=1
+    )
+    monthly_rows = "".join(
+        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+            pd.Timestamp(pe).date(),
+            fmt_pct(row["EGEN_Coverage"]),
+            fmt_pct(row["EGEN_TER_Renorm"], 2),
+            fmt_pct(row["PA_Coverage"]),
+            fmt_pct(row["PA_TER_Renorm"], 2),
+        )
+        for pe, row in monthly.iterrows()
+    )
+    monthly_table = (
+        "<table><thead><tr><th>Periodslut</th><th>EGEN täckning</th><th>EGEN TER</th>"
+        "<th>PA täckning</th><th>PA TER</th></tr></thead>"
+        f"<tbody>{monthly_rows}</tbody></table>"
+    )
+
+    missing_frames = []
+    for p in (egen, pa):
+        if not p.missing.empty:
+            frame = p.missing.copy()
+            frame.insert(0, "Portfölj", p.portfolio)
+            missing_frames.append(frame)
+    if missing_frames:
+        all_missing = pd.concat(missing_frames, ignore_index=True)
+        missing_rows = "".join(
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+                row["Portfölj"],
+                html.escape(str(row["Display_Name"])),
+                html.escape(str(row["ISIN"])),
+                int(row["Perioder"]),
+                fmt_pct(row["Maxvikt"]),
+            )
+            for _, row in all_missing.iterrows()
+        )
+        missing_block = (
+            f'<div class="warn"><p><strong>Innehav utan TER ({len(all_missing)} '
+            "poster):</strong> förkravet att alla EGEN/PA-innehav har TER håller "
+            "<em>inte</em> – följande innehav i fönstret saknar TER (till stor del "
+            "fonder som lämnat portföljen; deras metadata finns inte längre hos "
+            "källan). Alla viktade TER-tal i avsnittet gäller den täckta vikten.</p>"
+            "<table><thead><tr><th>Portfölj</th><th>Instrument</th><th>ISIN</th>"
+            "<th>Periodslut</th><th>Maxvikt</th></tr></thead>"
+            f"<tbody>{missing_rows}</tbody></table></div>"
+        )
+    else:
+        missing_block = (
+            "<p>Samtliga innehav i fönstret har TER – full täckning i alla perioder.</p>"
+        )
+
+    # --- 6.2: motvind och dekomponering ----------------------------------------
+    gap_egen_tgt = since("PORT_EGEN_REAL") - since("PORT_EGEN_TGT")
+    gap_egen_pa = since("PORT_EGEN_REAL") - since("PORT_PA_REAL")
+    # Avgiftens mekaniska bidrag till nettogapet: negativ TER-differens (EGEN
+    # billigare) ger positivt bidrag till EGEN:s relativa nettoavkastning.
+    fee_contrib_tgt = -costs.fee_gap_egen_tgt_cum
+    fee_contrib_pa = -costs.fee_gap_egen_pa_cum
+    mgmt_tgt = gap_egen_tgt - fee_contrib_tgt
+    mgmt_pa = gap_egen_pa - fee_contrib_pa
+
+    cheapest_clause = ""
+    if costs.cheapest_broad_global is not None:
+        name, cheap_ter = costs.cheapest_broad_global
+        cheapest_clause = (
+            f"<p><strong>Mot ett billigt indexalternativ:</strong> det billigaste breda "
+            f"globala instrumentet i universumet är {html.escape(name)} "
+            f"(TER {fmt_pct(cheap_ter, 2)}). Relativt det bär EGEN en strukturell "
+            f"avgiftsmotvind på {fmt_pct(egen.ter_tw_renorm - cheap_ter, 2)}/år "
+            f"(tidsviktat, täckt vikt) och PA {fmt_pct(pa.ter_tw_renorm - cheap_ter, 2)}/år. "
+            f"Det är ett stiliserat räkneexempel på vad avgiftsnivån kostar mot det "
+            f"billigaste bytbara alternativet – ingen utsaga om förväntad avkastning. "
+            f"Nordnet-referensernas egna avgifter saknas i datan och ingår inte.</p>"
+        )
+
+    decomposition = f"""
+<p><strong>Principen först:</strong> alla serier är netto (NAV) – TER ligger redan i
+avkastningen och läggs inte tillbaka. TER-differenser används i stället för att säga
+hur stor del av ett observerat <em>netto</em>-gap som är avgift (kontrollerbar – kan
+bytas till billigare) respektive bruttoförvaltning (fondernas utfall före avgift plus
+de egna besluten).</p>
+<p><strong>EGEN mot sin egen lista (TGT):</strong> tidsviktad TER för EGEN:s faktiska
+resa är {fmt_pct(egen.ter_tw_renorm, 2)}/år (täckt vikt) mot {fmt_pct(egen.snapshot_ter.get("TGT", float("nan")), 2)}
+för dagens målviktslista – en differens på {fmt_pct(costs.fee_gap_egen_tgt, 2)}/år,
+vars mekaniska bidrag till nettogapet över fönstret är {fmt_pp(fee_contrib_tgt, 2)}
+(linjärt: differens × {costs.window_years:.2f} år). Av gapet REAL−TGT på
+{fmt_pp(gap_egen_tgt, 2)} är alltså {fmt_pp(fee_contrib_tgt, 2)} avgift och
+{fmt_pp(mgmt_tgt, 2)} bruttoförvaltning. <strong>Gapet mot den egna listan är i allt
+väsentligt förvaltning, inte avgift</strong> – med förbehållen att referensen bär
+survivorship-/look-ahead-bias (avsnitt 7.2) och att EGEN:s historiska TER-täckning är
+{fmt_pct(egen.coverage_tw)} av vikten.</p>
+<p><strong>EGEN mot PA (kärnfrågan):</strong> EGEN:s tidsviktade TER
+({fmt_pct(egen.ter_tw_renorm, 2)}) är <em>{"lägre" if costs.fee_gap_egen_pa < 0 else "högre"}</em>
+än PA:s ({fmt_pct(pa.ter_tw_renorm, 2)}) – differens {fmt_pct(costs.fee_gap_egen_pa, 2)}/år,
+dvs. en strukturell avgifts{"medvind" if fee_contrib_pa > 0 else "motvind"} för EGEN
+på {fmt_pp(fee_contrib_pa, 2)} över fönstret. Nettogapet EGEN−PA är
+{fmt_pp(gap_egen_pa, 2)} – EGEN ligger {_fore_efter(gap_egen_pa)} PA i det gemensamma
+fönstret (avsnitt 7.1). Rensat för avgiftsdifferensen är bruttoförvaltningsgapet
+{fmt_pp(mgmt_pa, 2)} – <strong>avgiftsskillnaden förklarar {fmt_pp(fee_contrib_pa, 2)}
+av gapet mot PA; resten är förvaltning</strong>, med samma täckningsförbehåll som
+ovan.</p>
+{cheapest_clause}
+"""
+
+    # --- 6.3: courtage -----------------------------------------------------------
+    ct = costs.courtage
+    ct_rows = "".join(
+        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+            html.escape(str(row["Display_Name"])),
+            html.escape(str(row["Category"])),
+            fmt_num(row["Courtage_SEK"], 0) + " kr",
+            int(row["Txn"]),
+        )
+        for _, row in ct.by_instrument.iterrows()
+    )
+    ct_table = (
+        "<table><thead><tr><th>Instrument</th><th>Kategori</th>"
+        "<th>Courtage (SEK)</th><th>Transaktioner</th></tr></thead>"
+        f"<tbody>{ct_rows}</tbody></table>"
+    )
+    bucket_range = (
+        f"{ct.first_bucket.strftime('%Y-%m')} – {ct.last_bucket.strftime('%Y-%m')}"
+        if ct.first_bucket is not None
+        else "–"
+    )
+    courtage_text = f"""
+<p>Realiserat courtage för EGEN i fönstret: <strong>{fmt_num(ct.total_sek, 0)} kr</strong>
+({ct.n_rows} månadsposter, {ct.n_txn} transaktioner, bucketar {bucket_range}). Mot den
+dagviktade genomsnittliga portföljvolymen ({fmt_num(ct.avg_mv_sek / 1000, 0)} tkr) över
+fönstrets {ct.window_years:.2f} år motsvarar det <strong>{fmt_pct(ct.pct_per_year, 3)}/år</strong>
+– försumbart bredvid TER-nivåerna ovan. Courtaget är <em>redan indraget</em> i
+REAL-serien (transaktionsbeloppen inkluderar courtage); det synliggörs här och dras
+inte av igen. PA har inga courtageposter i fönstret ({costs.pa_courtage_rows} rader) –
+fondhandel sker utan courtage, och EGEN:s courtage uppstår först när ETF-handeln
+inleds ({ct.first_bucket.strftime("%Y-%m") if ct.first_bucket is not None else "–"}).
+Bucketarna är kalendermånader; den sista omfattar transaktioner till och med as-of.</p>
+{ct_table}
+"""
+
+    flags_html = "".join(f"<li>{html.escape(flag)}</li>" for flag in costs.flags)
+    return f"""
+<p>Avsnittet kvantifierar den strukturella avgiftsmotvinden (Steg 2b): tidsviktad
+löpande avgift (TER) ur <code>Dim_Instrument</code> × månadsvikterna i
+<code>Fact_Portfolio_Alloc_Monthly</code>, plus realiserat courtage ur
+<code>Fact_Portfolio_Courtage</code>. Vikterna vid varje periodslut representerar den
+gångna perioden och vägs med kalenderdagar; fönster och as-of är rapportens gemensamma
+({costs.inception.date()} – {costs.as_of.date()}).</p>
+{missing_block}
+<h3>6.1 Löpande avgift (TER)</h3>
+<img src="data:image/png;base64,{ter_chart}" alt="Viktad TER per periodslut">
+{tw_table}
+<p>Dagens listor (snapshot, full TER-täckning i samtliga):</p>
+{snap_table}
+<p>Underlaget per periodslut – täckningen är svag i fönstrets början (fonder som
+lämnat portföljen saknar TER-uppgift) och fullständig mot slutet:</p>
+{monthly_table}
+<h3>6.2 Avgiftsmotvind och dekomponering av gapen</h3>
+{decomposition}
+<h3>6.3 Courtage – omsättningens direkta kostnad</h3>
+{courtage_text}
+<h3>6.4 Poster som inte fångas</h3>
+<div class="warn"><ul>{flags_html}</ul></div>
+"""
+
+
+def _costs_verification_section(costs_verification: pd.DataFrame) -> str:
+    rows = "".join(
+        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.2e}</td><td>{}</td></tr>".format(
+            html.escape(str(row["Kontroll"])),
+            fmt_num(row["Visat"], 6),
+            fmt_num(row["Omräknat"], 6),
+            row["Diff"],
+            "OK" if row["OK"] else "AVVIKER",
+        )
+        for _, row in costs_verification.iterrows()
+    )
+    return f"""
+<h4>Avgiftsavsnittets kontrollvärden</h4>
+<p>Den tidsviktade TER:n räknas om via en oberoende väg (viktmatris × TER-vektor,
+vektoriserat) och jämförs mot rapportens gruppvisa beräkning; courtagesumman
+korssummeras mot facten och instrumenttabellen; snapshot-täckningen ska vara exakt
+1,0 för samtliga listor.</p>
+<table><thead><tr><th>Kontroll</th><th>Visat</th><th>Omräknat</th><th>|Diff|</th>
+<th>Status</th></tr></thead><tbody>{rows}</tbody></table>
+"""
+
+
 def _interpretation_section(
-    data: BIData, kpi: pd.DataFrame, inception: pd.Timestamp, as_of: pd.Timestamp
+    data: BIData,
+    kpi: pd.DataFrame,
+    inception: pd.Timestamp,
+    as_of: pd.Timestamp,
+    costs: CostsResult,
 ) -> str:
     pa = _facts(data, "PA", kpi, inception, as_of)
     egen = _facts(data, "EGEN", kpi, inception, as_of)
@@ -421,8 +658,10 @@ def _interpretation_section(
     egen_best = egen["categories"].iloc[0]
     pa_best = pa["categories"].iloc[0]
 
+    egen_costs = costs.ter["EGEN"]
+    fee_contrib_pa = -costs.fee_gap_egen_pa_cum
     return f"""
-<h3>6.1 Vad siffrorna visar</h3>
+<h3>7.1 Vad siffrorna visar</h3>
 {egen_vs_pa}
 {gap_text(pa, "PA")}
 {gap_text(egen, "EGEN")}
@@ -433,7 +672,7 @@ medan <strong>{html.escape(egen_worst['Kategori'])}</strong>
 I PA var <strong>{html.escape(pa_best['Kategori'])}</strong> ({fmt_pct(pa_best['Ret_Since'])})
 starkast.</p>
 
-<h3>6.2 Hur REAL-vs-CUR/TGT-gapet får – och inte får – tolkas</h3>
+<h3>7.2 Hur REAL-vs-CUR/TGT-gapet får – och inte får – tolkas</h3>
 <p>CUR och TGT är <em>konstantviktade (dagligen rebalanserade) portföljer av den
 nuvarande fondlistan, bakåtprojicerade</em> över hela perioden. Listan är vald med facit i hand: fonder som
 åkt ut ur portföljen under resan ingår inte, och fonder som köpts in sent får i
@@ -455,11 +694,18 @@ inte uppenbart förstört värde relativt sin egen nuvarande lista, med reservat
 svagare än backprojektionen av sin egen lista – ett tydligt <em>underlag för vidare
 analys</em>, inte en dom.</p>
 <p><strong>Vad som nu besvaras respektive återstår:</strong> Brinson-attributionen,
-rebalansering-mot-slump-testet och koncentrationsanalysen finns i avsnitt 5, byggda på
-de historiska månadsvikterna (Steg 2a). Det som återstår är den strukturella
-avgiftsmotvinden – den kräver TER per fond (Steg 2b) och kvantifieras inte här.</p>
+rebalansering-mot-slump-testet och koncentrationsanalysen finns i avsnitt 5 (Steg 2a),
+och avgiftsmotvinden kvantifieras i avsnitt 6 (Steg 2b). Avgiftsspåret skärper
+selektionsläsningen: EGEN:s tidsviktade TER ({fmt_pct(egen_costs.ter_tw_renorm, 2)},
+på täckt vikt) är {"lägre" if costs.fee_gap_egen_pa < 0 else "högre"} än PA:s – en
+strukturell avgifts{"medvind" if fee_contrib_pa > 0 else "motvind"} på
+{fmt_pp(fee_contrib_pa, 2)} mot PA över fönstret. Gapet mot PA är alltså inte
+avgiftsdrivet; det som återstår efter avgiftsjustering är förvaltning/selektion, och
+survivorship-förbehållet ovan kvarstår. Det som
+återstår är TER för de innehav som lämnat portföljen (täckningsluckan i avsnitt 6)
+samt spread/FX-växling, som inte fångas av datan.</p>
 
-<h3>6.3 Pilotens metafråga och rekommendation</h3>
+<h3>7.3 Pilotens metafråga och rekommendation</h3>
 <p>Ger den här rapporten beslutsvärde utöver Power BI? Bedömning: <strong>ja, men på
 tolknings- och verifieringslagret snarare än på siffrorna</strong>. Kurvorna och
 KPI-tabellerna finns redan i Power BI. Det rapporten tillför är (1) ett gemensamt
@@ -469,11 +715,12 @@ bias-hantering – Power BI visar gapet men förklarar inte varför det inte få
 skicklighet, och (4) ett reproducerbart, versionerat underlag som kan byggas om vid
 varje datauppdatering och as-of-datum.</p>
 <p><strong>Rekommendation: fortsätt, med justerat scope.</strong> Med Steg 2a-vikterna
-på plats attribuerar avsnitt 5 nu gapet mekaniskt (allokering/selektion/koncentration).
-Den kvarvarande dataluckan med störst beslutsvärde är TER per fond (Steg 2b) – utan den
-går den strukturella avgiftsmotvinden inte att skilja från selektionstermen. Behåll
-Power BI för löpande överblick; låt det här spåret äga fördjupning, attribution och
-verifiering.</p>
+på plats attribuerar avsnitt 5 gapet mekaniskt (allokering/selektion/koncentration),
+och med TER + courtage (Steg 2b) skiljer avsnitt 6 avgift från förvaltning. Den
+kvarvarande dataluckan med störst beslutsvärde är TER för utgångna innehav –
+täckningen bakåt i tiden är {fmt_pct(egen_costs.coverage_tw)} av EGEN:s vikt, så den
+historiska avgiftsbilden vilar på den täckta delen. Behåll Power BI för löpande
+överblick; låt det här spåret äga fördjupning, attribution och verifiering.</p>
 """
 
 
@@ -778,8 +1025,12 @@ def build_html(
     horizons: list[Horizon],
     kpi: pd.DataFrame,
     attributions: dict[str, PortfolioAttribution] | None = None,
+    costs: CostsResult | None = None,
+    costs_verification: pd.DataFrame | None = None,
 ) -> str:
     """Sätt ihop hela rapporten till en självbärande HTML-sträng."""
+    if costs is None:
+        raise ValueError("Kostnadsanalysen (costs) krävs för att bygga rapporten.")
     start_date = inception.date()
     end_date = as_of.date()
     window_years = (as_of - inception).days / 365.25
@@ -818,7 +1069,7 @@ tal i rapporten är beräknade ur källfilen – inget är uppskattat.</p>
 <p>EGEN (blå) mäts mot PA (röd) – referensportföljen som ska slås – samt externa
 blandfondsreferenser, allt rebaserat till 100 vid EGEN:s inception. CUR och TGT är
 konstantviktade referenser, dagligen ombalanserade till fasta vikter (nuvarande
-fondlista resp. målvikter), bakåtprojicerade – se förbehållen i avsnitt 6.2 innan
+fondlista resp. målvikter), bakåtprojicerade – se förbehållen i avsnitt 7.2 innan
 gapet tolkas.</p>
 {headline}
 {index_sections}
@@ -848,12 +1099,16 @@ tabellerna deskriptivt.</p></div>
 <h2>5. Attribution – varifrån kommer gapet mot den egna listan?</h2>
 {_attribution_section(attributions)}
 
-<h2>6. Tolkning och metodikbedömning</h2>
-{_interpretation_section(data, kpi, inception, as_of)}
+<h2>6. Avgifter och kostnader – den strukturella motvinden (Steg 2b)</h2>
+{_costs_section(costs, kpi)}
+
+<h2>7. Tolkning och metodikbedömning</h2>
+{_interpretation_section(data, kpi, inception, as_of, costs)}
 
 <h2>Bilaga: Självverifiering</h2>
 {_verification_section(verification, contract_failures)}
 {_attribution_verification_section(attributions)}
+{_costs_verification_section(costs_verification) if costs_verification is not None else ""}
 </body>
 </html>
 """

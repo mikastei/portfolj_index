@@ -29,6 +29,7 @@ from src.config import BI_DATA_OUTPUT_PATH, FOND_RAPPORT_OUTPUT_DIR, BASE_DIR
 from src.prices import CACHE_PATH
 
 from .attribution import run_attribution
+from .costs import compute_costs, verify_costs
 from .data import BIData, check_contract, load_bi_data
 from .metrics import window_kpi_table
 from .report import build_html
@@ -152,6 +153,22 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
+    costs = compute_costs(data, inception, as_of)
+    costs_verification = verify_costs(data, costs)
+    egen_ter, pa_ter = costs.ter["EGEN"], costs.ter["PA"]
+    print(
+        f"Avgifter: tidsviktad TER EGEN {egen_ter.ter_tw_renorm * 100:.2f} %/år "
+        f"(täckning {egen_ter.coverage_tw * 100:.0f} %) mot PA "
+        f"{pa_ter.ter_tw_renorm * 100:.2f} %/år (täckning {pa_ter.coverage_tw * 100:.0f} %); "
+        f"courtage EGEN {costs.courtage.total_sek:.0f} kr "
+        f"({costs.courtage.pct_per_year * 100:.3f} %/år)"
+    )
+    if not costs_verification["OK"].all():
+        failing = costs_verification[~costs_verification["OK"]]
+        print("Avbryter: avgiftsavsnittets kontrollvärden avviker:", file=sys.stderr)
+        print(failing.to_string(index=False), file=sys.stderr)
+        return 1
+
     html_text = build_html(
         data,
         verification,
@@ -161,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
         horizons,
         kpi_frame,
         attributions,
+        costs,
+        costs_verification,
     )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)

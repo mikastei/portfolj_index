@@ -339,8 +339,8 @@ def compute_attribution(
     )
 
     flags.append(
-        "TER/avgiftsmotvind kan inte beräknas ännu (Steg 2b) – ingen komponent nedan "
-        "mäter avgifternas bidrag."
+        "Komponenterna är netto avgifter (NAV) – ingen komponent nedan isolerar "
+        "avgiftsbidraget; avgiftsmotvinden kvantifieras separat i avsnitt 6 (Steg 2b)."
     )
     flags.append(
         "CUR/TGT är dagens lista bakåtprojicerad (survivorship/look-ahead). "
