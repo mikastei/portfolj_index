@@ -1213,18 +1213,23 @@ total return) och Räntor (kort företagsobligation) – med fasta strategivikte
 PA:s referens visar om PA själv slår passivt index – kontext till EGEN:s primärmål
 att slå PA. EGEN mot PA finns i headline-diagrammet (avsnitt 1).</p>
 <img src="data:image/png;base64,{png}" alt="Portföljerna mot policyreferenserna">
-<p>OLS på dagliga avkastningar över fönstret: r<sub>REAL</sub> = alfa + beta ·
-r<sub>POLICY</sub>. Alfa redovisas annualiserad ((1&nbsp;+&nbsp;alfa<sub>dag</sub>)<sup>252</sup>&nbsp;−&nbsp;1).
+<p>OLS på <strong>veckoavkastningar</strong> (fredag–fredag; infaller helgdag slutar
+veckan på närmast föregående handelsdag) över fönstret: r<sub>REAL</sub> = alfa + beta ·
+r<sub>POLICY</sub>. Alfa redovisas annualiserad ((1&nbsp;+&nbsp;alfa<sub>vecka</sub>)<sup>52</sup>&nbsp;−&nbsp;1).
 Beta/Alfa visas endast när R² &gt; {fmt_num(R2_THRESHOLD)}.</p>
 <table><thead><tr><th>Regression</th><th>R²</th><th>Beta</th><th>Alfa (ann.)</th>
-<th>Obs</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
+<th>Obs (veckor)</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
 <p class="sub">Proxys: Aktier = iShares MSCI ACWI UCITS ETF Acc (IUSQ.DE, EUR→SEK,
 Europastängning för dagsynk med fond-NAV:erna); Räntor = Carnegie Corporate Bond 3
 SEK Cap. Nivåbias: proxyfonderna är net-of-fee (~0,2 resp. ~0,4&nbsp;%/år), vilket gör
 referensen något lättare att slå – liten, konstant effekt i alfa-nivån. Båda buckets
-är total return (ackumulerande ETF resp. ackumulerande fond-NAV). Kvarvarande
-NAV-lagg i portföljens fonder sänker daglig R² strukturellt – det är detta
-R²-spärren fångar.</p>
+är total return (ackumulerande ETF resp. ackumulerande fond-NAV). Regressionen görs
+på veckobas eftersom portföljens fonder NAV-sätts med eftersläpning (USA/Asien-
+exponering får kursen en dag senare): på dagsbas felalignas avkastningarna, R² trycks
+ned strukturellt och beta biasas mot noll – en mätartefakt, inte ett strategiavtryck.
+Veckoaggregeringen neutraliserar laggen. Priset är färre observationer (~52/år);
+konfidensintervallen kring beta/alfa är breda tills historiken växer. Dagsserierna
+används oförändrade för grafer och övriga KPI:er.</p>
 {preliminary_note}
 {suppressed_note}"""
 
