@@ -17,3 +17,18 @@ bi_data_local_output = "/Users/mikael/Fondanalys-Data/03_Utdata/portfolio_bi_dat
 # Fond-rapportens utdata (självbärande HTML) i den maskinlokala dataroten.
 # Filnamn: fond_rapport_<as-of>.html. Faller tillbaka till repo-reports/ om tomt.
 fond_rapport_output_dir = "/Users/mikael/Fondanalys-Data/04_Analyser/Portföljanalyser"
+
+[policy]
+# Passiva policyreferenser: tvåbucketsindex (Aktier/Räntor) med årsvis ombalansering –
+# reset till strategivikterna 1 januari, fri drift inom året. Bucketproxys pekar på
+# Benchmark_ID-rader i transaktioner.xlsx (Benchmarks-tabellen); priserna
+# FX-konverteras till SEK i beräkningen. Se src/policy.py.
+# Aktier: MSCI ACWI via UCITS-ETF med Europastängning (IUSQ.DE) – synkar dagsdata
+# med portföljens svenska fond-NAV:er betydligt bättre än US-noterade ACWI
+# (22:00 CET), vilket annars trycker ned beta/R² i regressionen på ren mätbrist.
+buckets = { Aktier = "BM_ACWI_UCITS", Rantor = "BM_Short_Corp_Bond" }
+
+[policy.weights]
+# Strategivikter (Aktier/Räntor) per portfölj – måste summera till 1.0.
+EGEN = { Aktier = 0.90, Rantor = 0.10 }
+PA = { Aktier = 0.85, Rantor = 0.15 }

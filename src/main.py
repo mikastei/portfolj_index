@@ -38,6 +38,7 @@ def run() -> int:
         discover_fx_tickers,
         required_tickers,
     )
+    from .policy import build_policy_series, build_policy_series_definition
     from .prices import download_adj_close
 
     _configure_logging()
@@ -96,6 +97,16 @@ def run() -> int:
     )
 
     series_map = build_portfolios_and_benchmarks(inputs)
+    series_map.update(
+        build_policy_series(
+            tables["benchmarks"],
+            tables["portfolio_metadata"],
+            prices,
+            config.BASE_CURRENCY,
+            config.POLICY_BUCKETS,
+            config.POLICY_WEIGHTS,
+        )
+    )
     series_definition = build_series_definition(
         tables["portfolio_metadata"],
         tables["benchmarks"],
@@ -104,6 +115,14 @@ def run() -> int:
         tickers["real"],
         tickers["model"],
     )
+    policy_definition = build_policy_series_definition(
+        tables["benchmarks"],
+        tables["portfolio_metadata"],
+        config.POLICY_BUCKETS,
+        config.POLICY_WEIGHTS,
+    )
+    if not policy_definition.empty:
+        series_definition = pd.concat([series_definition, policy_definition], ignore_index=True)
     portfolio_series_map = build_portfolio_series_map(
         tables["portfolio_metadata"],
         tables["transactions"],

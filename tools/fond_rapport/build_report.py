@@ -32,6 +32,7 @@ from .attribution import run_attribution
 from .costs import compute_costs, verify_costs
 from .data import BIData, check_contract, load_bi_data
 from .metrics import window_kpi_table
+from .policy import compute_policy_regressions
 from .report import build_html
 from .risk import MODEL_GAP_WARN, compute_risk
 from .verify import verify_kpis
@@ -176,6 +177,22 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
+    policy_regressions = compute_policy_regressions(data, inception, as_of)
+    if policy_regressions is None:
+        print(
+            "VARNING: policyserier saknas i BI-filen – policyblocket byggs utan beräkning.",
+            file=sys.stderr,
+        )
+    else:
+        for portfolio, reg in policy_regressions.items():
+            gate = "visas" if reg.show_beta_alpha else "undertrycks (R² under spärren)"
+            prelim = " [preliminärt]" if reg.preliminary else ""
+            print(
+                f"Policy {portfolio} vs {reg.policy_series_id}: beta {reg.beta:.3f}, "
+                f"alfa {reg.alpha_annual * 100:+.2f} %/år, R² {reg.r2:.3f} "
+                f"({reg.n_obs} obs) – beta/alfa {gate}{prelim}"
+            )
+
     costs = compute_costs(data, inception, as_of)
     costs_verification = verify_costs(data, costs)
     egen_ter, pa_ter = costs.ter["EGEN"], costs.ter["PA"]
@@ -204,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
         costs,
         costs_verification,
         risks,
+        policy_regressions,
     )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)

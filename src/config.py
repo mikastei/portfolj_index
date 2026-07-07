@@ -30,6 +30,10 @@ FOND_RAPPORT_OUTPUT_DIR = Path(
     _CONFIG["paths"].get("fond_rapport_output_dir", str(BASE_DIR / "reports"))
 )
 
+# Policyreferenser: bucket -> Benchmark_ID samt strategivikter per portfölj.
+POLICY_BUCKETS: dict[str, str] = _CONFIG.get("policy", {}).get("buckets", {})
+POLICY_WEIGHTS: dict[str, dict[str, float]] = _CONFIG.get("policy", {}).get("weights", {})
+
 BASE_CURRENCY = "SEK"
 RF_RATE_ANNUAL = 0.03
 TRADING_DAYS_PER_YEAR = 252

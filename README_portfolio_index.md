@@ -120,6 +120,30 @@ Foreslaget BI-datakontrakt och rapportspec finns i:
 - `docs/powerbi_mvp_v1_spec.md`
 - `docs/powerbi_dax_v1.md`
 
+## Policyreferenser (passiva tvabucketsindex)
+
+Upstream bygger passiva policyreferenser per portfolj (`POLICY_EGEN` 90/10,
+`POLICY_PA` 85/15) i `src/policy.py`, konfigurerade i `config.toml` under
+`[policy]`:
+
+- Tva buckets: Aktier = MSCI ACWI inkl. EM (UCITS-ETF `IUSQ.DE`, EUR->SEK) och
+  Rantor = kort foretagsobligation (Carnegie Corporate Bond 3 SEK Cap).
+  Proxytickers pekas ut via rader i Benchmarks-tabellen i transaktioner.xlsx.
+- Fasta strategivikter med arsvis ombalansering: reset till strategivikterna
+  1 januari, fri drift inom aret. Viktsumman kontrolleras mot 1,0 varje dag.
+- Serierna gar genom BI-sparet till `Dim_Series`/`Fact_Series_Daily`/
+  `Fact_Series_KPI` (Series_Type `POLICY`), och fond-rapporten redovisar
+  Beta/Alfa/R2 for REAL mot respektive referens (R2-sparr 0,70, preliminar-
+  markering tills fonstret rymmer 3 ars historik).
+- Oberoende verifiering: `python -m tools.fond_rapport.verify_policy` korskor
+  indexnivaerna mot en direkt prisberakning (buy-and-hold-identiteten inom aret).
+
+Referensen speglar det enda avsiktliga strategivalet (aktier/rantor-nivan) -
+geografi-, EM- och tematiska val hamnar i alfa. OBS: 4-bucket-mappningen
+(Rantor & Lagrisk -> Rantor; Tillvaxtmarknader -> Tillvaxt; geografi Sverige ->
+Sverige; ovrigt -> Global) ar en framtida analysdimension for allokerings-
+attribution och anvands INTE i referensindexen.
+
 ## Hur sparen halls isar
 
 Gemensamt upstream-spar:
