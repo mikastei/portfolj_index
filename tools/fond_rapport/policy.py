@@ -7,16 +7,32 @@ strategivalet (aktier/räntor-nivån); geografi-, EM- och tematiska val hamnar i
 alfa. PA:s referens visar om PA själv slår passivt index – kontext till EGEN:s
 primärmål att slå PA.
 
-Regressionen är OLS på dagliga avkastningar över rapportens gemensamma fönster:
+Regressionen är OLS på VECKOavkastningar (fre–fre) över rapportens gemensamma
+fönster:
 
-    r_REAL(t) = alfa + beta · r_POLICY(t) + e(t)
+    r_REAL(v) = alfa + beta · r_POLICY(v) + e(v)
 
+- **Veckobas, inte dagsbas**: portföljens fonder NAV-sätts med eftersläpning
+  (fonder med USA/Asien-exponering får kursen en dag senare), vilket gör
+  dagsavkastningarna felalignade mot referensen. Daglig R² trycks då ned
+  strukturellt (mätartefakt, bevisad via lag-korrelationer) och beta biasas mot
+  noll. Veckoaggregeringen neutraliserar laggens andel av variationen; därför
+  är veckodata rapporteringsbasen (beslut 2026-07-07). Dagsserierna behålls
+  oförändrade för grafer och övriga KPI:er.
+- **Fre–fre**: dagsavkastningarna kapitaliseras per vecka som slutar fredag;
+  infaller helgdag används närmast föregående handelsdag som veckoslut.
+  Serierna alignas dagligen (inner join) före aggregeringen så att båda
+  veckoserier bygger på exakt samma handelsdagar. Kantveckor (fönstrets första/
+  sista vecka) kan rymma färre dagar men är konsistenta observationer av samma
+  samband.
 - **Beta** = samvariationen med referensen (kvot av kovarians/varians).
-- **Alfa** redovisas annualiserad: (1 + alfa_dag)^252 − 1.
+- **Alfa** redovisas annualiserad: (1 + alfa_vecka)^52 − 1.
 - **R²** = förklaringsgrad. Beta/Alfa visas endast när R² > 0,70 – under det
   förklarar referensen för lite av variationen för att måtten ska bära.
 - **Preliminärt**: alfa/beta blir meningsfulla först vid ~3 års historik.
-  Gränsen är datumstyrd (inception + 3 år), aldrig hårdkodad text.
+  Gränsen är datumstyrd (inception + 3 år), aldrig hårdkodad text. Veckobasen
+  ger dessutom få observationer (~52/år); konfidensintervallen kring beta/alfa
+  är breda tills historiken växer.
 
 Nivåbias att känna till: proxyfonderna är net-of-fee (ACWI-UCITS ~0,2 %/år,
 räntefonden ~0,4 %/år), vilket gör referensen något lättare att slå – en liten,
@@ -24,9 +40,8 @@ konstant och dokumenterad effekt i alfa-nivån.
 
 Mätteknik: aktiebucketen använder Europanoterade IUSQ.DE (Xetra, 17:30 CET) i
 stället för US-noterade ACWI (22:00 CET) för att synka dagsavkastningarna med
-portföljens svenska fond-NAV:er. Kvarvarande NAV-lagg (fonder med USA/Asien-
-exponering NAV-sätts med en dags eftersläpning) trycker ändå ned daglig R²
-strukturellt – R²-spärren är tänkt att fånga exakt detta.
+portföljens svenska fond-NAV:er – det minskar laggen men tar inte bort den,
+därav veckobasen ovan.
 """
 
 from __future__ import annotations
@@ -36,13 +51,14 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from src.config import TRADING_DAYS_PER_YEAR
-
 from .data import BIData
 from .metrics import WindowSlice
 
 # Portfölj -> policyreferensens Series_ID.
 POLICY_SERIES = {"EGEN": "POLICY_EGEN", "PA": "POLICY_PA"}
+
+# Veckoregressionens annualiseringsbas.
+WEEKS_PER_YEAR = 52
 
 # Beta/Alfa visas endast när referensen förklarar merparten av variationen.
 R2_THRESHOLD = 0.70
@@ -59,9 +75,9 @@ class PolicyRegression:
     policy_series_id: str
     start: pd.Timestamp
     end: pd.Timestamp
-    n_obs: int
+    n_obs: int  # antal veckoobservationer
     beta: float
-    alpha_daily: float
+    alpha_weekly: float
     alpha_annual: float
     r2: float
     preliminary_until: pd.Timestamp  # inception + 3 år (datumstyrt)
@@ -77,7 +93,11 @@ class PolicyRegression:
 
 
 def regress_returns(y: pd.Series, x: pd.Series) -> tuple[float, float, float, int]:
-    """(beta, alfa_dag, R², n) för OLS y = alfa + beta·x på datum-alignade serier."""
+    """(beta, alfa, R², n) för OLS y = alfa + beta·x på datum-alignade serier.
+
+    Periodicitetsagnostisk: alfa kommer i samma periodlängd som inserierna
+    (veckobas i rapporten – annualisera med ``annualize_alpha``).
+    """
     joined = pd.concat([y, x], axis=1, join="inner", keys=["y", "x"]).dropna()
     n = len(joined)
     if n < 3:
@@ -95,9 +115,30 @@ def regress_returns(y: pd.Series, x: pd.Series) -> tuple[float, float, float, in
     return beta, alpha, r2, n
 
 
-def annualize_alpha(alpha_daily: float) -> float:
-    """Geometrisk annualisering av daglig alfa: (1 + alfa)^252 − 1."""
-    return float((1.0 + alpha_daily) ** TRADING_DAYS_PER_YEAR - 1.0)
+def annualize_alpha(alpha_weekly: float) -> float:
+    """Geometrisk annualisering av veckoalfa: (1 + alfa)^52 − 1."""
+    return float((1.0 + alpha_weekly) ** WEEKS_PER_YEAR - 1.0)
+
+
+def weekly_returns(daily):
+    """Veckoavkastningar (fre–fre) ur dagsavkastningar med datumindex.
+
+    Dagsavkastningarna kapitaliseras per vecka som slutar fredag
+    (``W-FRI``-buckets); är fredagen helgdag slutar veckan automatiskt på
+    närmast föregående handelsdag, eftersom bucketen då bara rymmer dagar fram
+    till den dagen. Observationen etiketteras med veckans sista faktiska
+    handelsdag. Veckor helt utan handelsdagar utelämnas.
+
+    Fungerar för både Series och DataFrame (kolumnvis) – ett DataFrame med
+    redan datum-alignade serier ger veckoserier på exakt samma buckets.
+    """
+    grouper = pd.Grouper(freq="W-FRI")
+    compounded = (1.0 + daily).groupby(grouper).prod() - 1.0
+    counts = daily.groupby(grouper).size()
+    last_trading_day = daily.index.to_series().groupby(grouper).max()
+    weekly = compounded[counts > 0]
+    weekly.index = pd.DatetimeIndex(last_trading_day[counts > 0])
+    return weekly
 
 
 def _window_returns(
@@ -126,7 +167,10 @@ def compute_policy_regressions(
     for portfolio, policy_id in POLICY_SERIES.items():
         real = _window_returns(data, f"PORT_{portfolio}_REAL", inception, as_of)
         policy = _window_returns(data, policy_id, inception, as_of)
-        beta, alpha_daily, r2, n = regress_returns(real, policy)
+        # Aligna dagligen först så att båda veckoserier bygger på samma dagar.
+        joined = pd.concat([real, policy], axis=1, join="inner", keys=["real", "policy"]).dropna()
+        weekly = weekly_returns(joined)
+        beta, alpha_weekly, r2, n = regress_returns(weekly["real"], weekly["policy"])
         out[portfolio] = PolicyRegression(
             portfolio=portfolio,
             policy_series_id=policy_id,
@@ -134,8 +178,8 @@ def compute_policy_regressions(
             end=as_of,
             n_obs=n,
             beta=beta,
-            alpha_daily=alpha_daily,
-            alpha_annual=annualize_alpha(alpha_daily),
+            alpha_weekly=alpha_weekly,
+            alpha_annual=annualize_alpha(alpha_weekly),
             r2=r2,
             preliminary_until=preliminary_until,
         )
