@@ -19,6 +19,7 @@ from .attribution import TOP_N_FUNDS, PortfolioAttribution
 from .costs import CostsResult
 from .data import BIData, series_index
 from .metrics import KPI_COLUMNS as METRIC_KPIS
+from .policy import R2_THRESHOLD, PolicyRegression
 from .risk import MODEL_GAP_WARN, PortfolioRiskWindow
 from .verify import VerificationResult
 from .window import Horizon, rebase_series
@@ -41,6 +42,10 @@ SERIES_LABELS = {
     "BM_BM_GLOBAL_LARGE": "Global Large Cap (ACWI)",
     "BM_BM_EMERGING_MARKETS": "Tillväxtmarknader (EEM)",
     "BM_BM_INTERMEDIATE_CORE_BOND": "Obligationer USA (AGG)",
+    "BM_BM_SHORT_CORP_BOND": "Kort företagsobligation (Carnegie Corp Bond, SEK)",
+    "POLICY_EGEN": "Policyreferens EGEN (90/10 passiv)",
+    "POLICY_PA": "Policyreferens PA (85/15 passiv)",
+    "POLICY_BUCKET_AKTIER": "Policybucket Aktier (ACWI i SEK)",
 }
 
 KPI_TABLE_SERIES = [
@@ -56,6 +61,8 @@ KPI_TABLE_SERIES = [
     "BM_BM_GLOBAL_LARGE",
     "BM_BM_EMERGING_MARKETS",
     "BM_BM_INTERMEDIATE_CORE_BOND",
+    "POLICY_EGEN",
+    "POLICY_PA",
 ]
 
 KPI_COLUMNS = [
@@ -1029,6 +1036,7 @@ def build_html(
     costs: CostsResult | None = None,
     costs_verification: pd.DataFrame | None = None,
     risks: dict[str, list[PortfolioRiskWindow]] | None = None,
+    policy_regressions: dict[str, PolicyRegression] | None = None,
 ) -> str:
     """Sätt ihop hela rapporten till en självbärande HTML-sträng."""
     if costs is None:
@@ -1086,6 +1094,7 @@ datumintervallen står i kolumnrubrikerna. Alla horisonter räknas relativt as-o
 {_kpi_table(kpi, "Since_Start")}
 {_one_year_kpi_block(kpi, horizons)}
 {_risk_block(risks)}
+{_policy_block(data, policy_regressions, inception, as_of)}
 
 <h2>3. Kategorier – var fanns avkastningen?</h2>
 <div class="warn"><p>Kategoriserierna är tidsviktade delportföljer (REAL_CAT). De visar
@@ -1127,6 +1136,97 @@ def _one_year_kpi_block(kpi: pd.DataFrame, horizons: list[Horizon]) -> str:
 
 
 PERIOD_LABELS = {"Since_Start": "Sedan start", "1Y": "1 år"}
+
+
+def _policy_block(
+    data: BIData,
+    policy: dict[str, PolicyRegression] | None,
+    inception: pd.Timestamp,
+    as_of: pd.Timestamp,
+) -> str:
+    """Policyreferens-blocket: trevägsbild + Beta/Alfa/R² per portfölj, i sektion 2."""
+    heading = "<h3>Policyreferens – Beta/Alfa mot passiv tvåbucketsreferens</h3>"
+    if not policy:
+        return (
+            f'{heading}<div class="warn"><p>Policyserierna (POLICY_EGEN/POLICY_PA) saknas '
+            "i BI-filen – kör om pipelinen med policykonfigurationen på plats.</p></div>"
+        )
+
+    chart_series = [
+        ("EGEN – verklig (REAL)", _windowed(data, "PORT_EGEN_REAL", inception, as_of), "EGEN"),
+        (SERIES_LABELS["POLICY_EGEN"], _windowed(data, "POLICY_EGEN", inception, as_of), "POLICY_EGEN"),
+        ("PA – referens att slå (REAL)", _windowed(data, "PORT_PA_REAL", inception, as_of), "PA"),
+        (SERIES_LABELS["POLICY_PA"], _windowed(data, "POLICY_PA", inception, as_of), "POLICY_PA"),
+    ]
+    png = charts.line_chart(
+        chart_series,
+        f"Trevägsbilden: EGEN och PA mot sina policyreferenser (bas 100 vid {inception.date()})",
+        "Index (bas 100)",
+        baseline=100.0,
+    )
+
+    rows = []
+    suppressed = []
+    for portfolio in PORTFOLIOS:
+        r = policy.get(portfolio)
+        if r is None:
+            continue
+        if r.show_beta_alpha:
+            beta_cell, alpha_cell = fmt_num(r.beta), fmt_pct(r.alpha_annual)
+        else:
+            beta_cell = alpha_cell = "–"
+            suppressed.append(
+                f"{portfolio}: Beta/Alfa undertrycks – R² {fmt_num(r.r2)} ligger under "
+                f"spärren {fmt_num(R2_THRESHOLD)} (referensen förklarar för lite av "
+                "variationen för att måtten ska bära)."
+            )
+        rows.append(
+            f'<tr class="real-row"><td>{SERIES_LABELS[f"PORT_{portfolio}_REAL"]} mot '
+            f"{SERIES_LABELS[r.policy_series_id]}</td>"
+            f"<td>{fmt_num(r.r2)}</td><td>{beta_cell}</td><td>{alpha_cell}</td>"
+            f"<td>{r.n_obs}</td></tr>"
+        )
+
+    any_reg = next(iter(policy.values()))
+    preliminary_note = ""
+    if any_reg.preliminary:
+        preliminary_note = (
+            f'<div class="warn"><p><strong>Preliminärt:</strong> alfa/beta blir '
+            f"meningsfulla först vid ~3 års historik – fönstret rymmer "
+            f"{(as_of - inception).days / 365.25:.1f} år. Blocket markeras preliminärt "
+            f"till {any_reg.preliminary_until.date()} (datumstyrt).</p></div>"
+        )
+    suppressed_note = (
+        '<div class="warn"><ul>'
+        + "".join(f"<li>{html.escape(n)}</li>" for n in suppressed)
+        + "</ul></div>"
+        if suppressed
+        else ""
+    )
+
+    return f"""{heading}
+<p>Policyreferenserna är passiva tvåbucketsindex i SEK – Aktier (MSCI ACWI inkl. EM,
+total return) och Räntor (kort företagsobligation) – med fasta strategivikter
+(EGEN 90/10, PA 85/15) och årsvis ombalansering: reset till strategivikterna
+1&nbsp;januari, fri drift inom året. De speglar det enda avsiktliga strategivalet
+(aktier/räntor-nivån); geografi-, EM- och tematiska val hamnar därmed i alfa.
+PA:s referens visar om PA själv slår passivt index – kontext till EGEN:s primärmål
+att slå PA. EGEN mot PA finns i headline-diagrammet (avsnitt 1).</p>
+<img src="data:image/png;base64,{png}" alt="Portföljerna mot policyreferenserna">
+<p>OLS på dagliga avkastningar över fönstret: r<sub>REAL</sub> = alfa + beta ·
+r<sub>POLICY</sub>. Alfa redovisas annualiserad ((1&nbsp;+&nbsp;alfa<sub>dag</sub>)<sup>252</sup>&nbsp;−&nbsp;1).
+Beta/Alfa visas endast när R² &gt; {fmt_num(R2_THRESHOLD)}.</p>
+<table><thead><tr><th>Regression</th><th>R²</th><th>Beta</th><th>Alfa (ann.)</th>
+<th>Obs</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
+<p class="sub">Proxys: Aktier = iShares MSCI ACWI UCITS ETF Acc (IUSQ.DE, EUR→SEK,
+Europastängning för dagsynk med fond-NAV:erna); Räntor = Carnegie Corporate Bond 3
+SEK Cap. Nivåbias: proxyfonderna är net-of-fee (~0,2 resp. ~0,4&nbsp;%/år), vilket gör
+referensen något lättare att slå – liten, konstant effekt i alfa-nivån. Båda buckets
+är total return (ackumulerande ETF resp. ackumulerande fond-NAV). Kvarvarande
+NAV-lagg i portföljens fonder sänker daglig R² strukturellt – det är detta
+R²-spärren fångar.</p>
+{preliminary_note}
+{suppressed_note}"""
 
 
 def _risk_block(risks: dict[str, list[PortfolioRiskWindow]] | None) -> str:

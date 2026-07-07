@@ -24,6 +24,9 @@ STYLE = {
     # Headline-diagrammet: EGEN (blå, kraftig) mot PA (röd, referensen att slå).
     "EGEN": {"color": "#1f4e9c", "linewidth": 2.6, "linestyle": "-"},
     "PA": {"color": "#b04a4a", "linewidth": 2.2, "linestyle": "-"},
+    # Policyreferenser: streckade i respektive portföljs färg.
+    "POLICY_EGEN": {"color": "#1f4e9c", "linewidth": 1.4, "linestyle": "--"},
+    "POLICY_PA": {"color": "#b04a4a", "linewidth": 1.4, "linestyle": "--"},
 }
 
 CATEGORY_COLORS = ["#1f4e9c", "#e07b39", "#2e8b57", "#b04a4a", "#7a5ca8", "#4aa0b0"]

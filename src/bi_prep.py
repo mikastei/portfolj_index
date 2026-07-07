@@ -17,7 +17,7 @@ from . import config
 from .bi_io import extract_run_parameters, load_portfolio_output
 from .bi_metrics import PERIOD_ORDER, compute_kpis, has_minimum_observations, slice_period
 
-ANALYSIS_PREFIXES = ("PORT_", "BM_")
+ANALYSIS_PREFIXES = ("PORT_", "BM_", "POLICY_")
 ALLOCATION_SNAPSHOT_SHEET_NAME = "Fact_Portfolio_Alloc_Snapshot"
 ALLOCATION_MONTHLY_SHEET_NAME = "Fact_Portfolio_Alloc_Monthly"
 ALLOCATION_MONTHLY_COLUMNS = [
@@ -140,8 +140,11 @@ def _build_analysis_metadata(
         (metadata["Series_Type"] == "PORT") & metadata["Category"].notna()
     )
     metadata["Is_Benchmark"] = metadata["Series_Type"] == "BM"
+    # Policyreferenser (passiva tvåbucketsindex) är jämförelseserier på samma
+    # sätt som benchmarks: med i översikt och KPI-beräkning.
+    metadata["Is_Policy"] = metadata["Series_Type"] == "POLICY"
     metadata["Is_Overview_Eligible"] = (
-        metadata["Is_Main_Portfolio_Series"] | metadata["Is_Benchmark"]
+        metadata["Is_Main_Portfolio_Series"] | metadata["Is_Benchmark"] | metadata["Is_Policy"]
     )
     metadata["Is_Performance_Eligible"] = (
         metadata["Is_Overview_Eligible"] | metadata["Is_Category_Series"]
@@ -190,6 +193,7 @@ def _build_dim_series(analysis_metadata: pd.DataFrame) -> pd.DataFrame:
             "Is_Main_Portfolio_Series",
             "Is_Category_Series",
             "Is_Benchmark",
+            "Is_Policy",
             "Is_Overview_Eligible",
             "Is_Performance_Eligible",
         ]

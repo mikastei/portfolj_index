@@ -11,7 +11,7 @@ import pandas as pd
 def build_master_timeseries_long(series_map: dict[str, pd.DataFrame]) -> pd.DataFrame:
     rows: list[pd.DataFrame] = []
     for series_id, df in series_map.items():
-        if not (series_id.startswith("PORT_") or series_id.startswith("BM_")):
+        if not series_id.startswith(("PORT_", "BM_", "POLICY_")):
             continue
         part = df.copy()
         part = part.reset_index()
