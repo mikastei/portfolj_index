@@ -33,6 +33,7 @@ from .costs import compute_costs, verify_costs
 from .data import BIData, check_contract, load_bi_data
 from .metrics import window_kpi_table
 from .report import build_html
+from .risk import MODEL_GAP_WARN, compute_risk
 from .verify import verify_kpis
 from .window import build_horizons, derive_inception, resolve_as_of
 
@@ -145,11 +146,33 @@ def main(argv: list[str] | None = None) -> int:
                 f"(kontrollsumma {attr.decomposition_residual:.2e}, "
                 f"replikering {attr.replication_max_diff:.2e})"
             )
+        prices = pd.read_parquet(args.price_cache)
+        prices.index = pd.to_datetime(prices.index)
+        risks = compute_risk(data, prices, horizons)
+        for portfolio, rows in risks.items():
+            for r in rows:
+                print(
+                    f"Risk {portfolio} [{r.period}]: summerad {r.summed_risk * 100:.2f} % − "
+                    f"portfölj {r.portfolio_risk * 100:.2f} % = diversifieringseffekt "
+                    f"{r.diversification * 100:.2f} pp; riskreduktion "
+                    f"{r.risk_reduction * 100:.1f} % ({r.level}); "
+                    f"modellkontroll √(w̄ᵀΣw̄) gap {r.model_gap * 100:+.2f} pp"
+                    + (f"; exkluderade: {r.excluded}" if r.excluded else "")
+                )
+                if abs(r.model_gap) > MODEL_GAP_WARN:
+                    print(
+                        f"VARNING: {portfolio} [{r.period}] – snittvikterna återger inte "
+                        f"den realiserade portföljvolen (gap {r.model_gap * 100:+.2f} pp > "
+                        f"{MODEL_GAP_WARN * 100:.1f} pp); tolka diversifieringseffekten "
+                        "med försiktighet (kraftig viktdrift i fönstret).",
+                        file=sys.stderr,
+                    )
     else:
         attributions = None
+        risks = None
         print(
-            f"VARNING: prismatris saknas ({args.price_cache}) – attributionsavsnittet "
-            "byggs utan beräkning.",
+            f"VARNING: prismatris saknas ({args.price_cache}) – attributions- och "
+            "diversifieringsavsnitten byggs utan beräkning.",
             file=sys.stderr,
         )
 
@@ -180,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         attributions,
         costs,
         costs_verification,
+        risks,
     )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)

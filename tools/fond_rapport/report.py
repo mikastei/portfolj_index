@@ -19,6 +19,7 @@ from .attribution import TOP_N_FUNDS, PortfolioAttribution
 from .costs import CostsResult
 from .data import BIData, series_index
 from .metrics import KPI_COLUMNS as METRIC_KPIS
+from .risk import MODEL_GAP_WARN, PortfolioRiskWindow
 from .verify import VerificationResult
 from .window import Horizon, rebase_series
 
@@ -1027,6 +1028,7 @@ def build_html(
     attributions: dict[str, PortfolioAttribution] | None = None,
     costs: CostsResult | None = None,
     costs_verification: pd.DataFrame | None = None,
+    risks: dict[str, list[PortfolioRiskWindow]] | None = None,
 ) -> str:
     """Sätt ihop hela rapporten till en självbärande HTML-sträng."""
     if costs is None:
@@ -1083,6 +1085,7 @@ datumintervallen står i kolumnrubrikerna. Alla horisonter räknas relativt as-o
 <h3>Fullständiga nyckeltal – sedan start ({start_date} – {end_date})</h3>
 {_kpi_table(kpi, "Since_Start")}
 {_one_year_kpi_block(kpi, horizons)}
+{_risk_block(risks)}
 
 <h2>3. Kategorier – var fanns avkastningen?</h2>
 <div class="warn"><p>Kategoriserierna är tidsviktade delportföljer (REAL_CAT). De visar
@@ -1121,3 +1124,63 @@ def _one_year_kpi_block(kpi: pd.DataFrame, horizons: list[Horizon]) -> str:
         note = one_year.note if one_year else "1Y ej definierad."
         return f'<h3>Senaste året (1Y)</h3><div class="warn"><p>{html.escape(note)}</p></div>'
     return f"<h3>Senaste året (1Y: {one_year.date_range()})</h3>{_kpi_table(kpi, '1Y')}"
+
+
+PERIOD_LABELS = {"Since_Start": "Sedan start", "1Y": "1 år"}
+
+
+def _risk_block(risks: dict[str, list[PortfolioRiskWindow]] | None) -> str:
+    """Diversifieringseffekt och riskreduktion per portfölj (REAL), i sektion 2."""
+    if not risks:
+        return (
+            '<h3>Diversifiering och riskreduktion</h3><div class="warn"><p>Prismatrisen '
+            "saknades vid bygget – komponentvolatiliteter kunde inte beräknas.</p></div>"
+        )
+    rows = []
+    notes = []
+    for portfolio in PORTFOLIOS:
+        for r in risks.get(portfolio, []):
+            rows.append(
+                f'<tr class="real-row"><td>{SERIES_LABELS[f"PORT_{portfolio}_REAL"]}</td>'
+                f"<td>{PERIOD_LABELS.get(r.period, r.period)}</td>"
+                f"<td>{fmt_pct(r.summed_risk)}</td>"
+                f"<td>{fmt_pct(r.portfolio_risk)}</td>"
+                f"<td>{fmt_pp(r.diversification)}</td>"
+                f"<td>{fmt_pct(r.risk_reduction)}</td>"
+                f"<td>{r.level}</td></tr>"
+            )
+            if r.excluded:
+                notes.append(
+                    f"{portfolio} [{PERIOD_LABELS.get(r.period, r.period)}]: "
+                    f"{len(r.excluded)} instrument utan full prishistorik exkluderade "
+                    f"({r.excluded_weight * 100:.1f} % vikt, renormaliserat)."
+                )
+            if abs(r.model_gap) > MODEL_GAP_WARN:
+                notes.append(
+                    f"{portfolio} [{PERIOD_LABELS.get(r.period, r.period)}]: modellkontrollen "
+                    f"√(w̄ᵀΣw̄) avviker {r.model_gap * 100:+.2f} pp från den realiserade volen "
+                    "(kraftig viktdrift i fönstret) – tolka diversifieringseffekten med försiktighet."
+                )
+    gap_max = max(
+        (abs(r.model_gap) for rs in risks.values() for r in rs), default=float("nan")
+    )
+    note_html = (
+        '<div class="warn"><ul>' + "".join(f"<li>{html.escape(n)}</li>" for n in notes) + "</ul></div>"
+        if notes
+        else ""
+    )
+    return f"""<h3>Diversifiering och riskreduktion</h3>
+<p><strong>Summerad risk</strong> är det viktade snittet av innehavens egen volatilitet
+(Σ&nbsp;wᵢ·σᵢ); <strong>portföljrisk</strong> är portföljens faktiska volatilitet – samma tal
+som Vol-kolumnen ovan. Skillnaden är <strong>diversifieringseffekten</strong>: risk som
+försvinner för att innehaven inte samvarierar perfekt. <strong>Riskreduktionen</strong>
+(1&nbsp;−&nbsp;portföljrisk/summerad risk) är den skalfria versionen och jämförbar mellan
+portföljer: under 15&nbsp;% svag, 15–25&nbsp;% god, över 25&nbsp;% stark spridning.</p>
+<table><thead><tr><th>Serie</th><th>Period</th><th>Summerad risk</th><th>Portföljrisk</th>
+<th>Diversifieringseffekt</th><th>Riskreduktion</th><th>Nivå</th></tr></thead>
+<tbody>{''.join(rows)}</tbody></table>
+<p class="sub">Vikter: dagviktat snitt av månadsvikterna (Fact_Portfolio_Alloc_Monthly, REAL)
+över respektive period; komponentvolatiliteter ur samma prismatris, fönster och annualisering
+(√252, ddof&nbsp;1) som portföljens Vol. Konsistenskontroll: √(w̄ᵀΣw̄) med snittvikterna
+återger den realiserade portföljvolen inom {fmt_pp(gap_max, 2).lstrip('+')} i värsta fallet.</p>
+{note_html}"""
