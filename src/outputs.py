@@ -88,7 +88,10 @@ def build_run_config(
                 "BASE_CURRENCY": base_currency,
                 "TRADING_DAYS_PER_YEAR": trading_days_per_year,
                 "FORWARD_FILL": bool(forward_fill),
-                "NO_REBALANCING": True,
+                # CUR/TGT beräknas som fasta vikter mot dagliga tillgångsavkastningar
+                # (_portfolio_returns_from_weights), vilket matematiskt motsvarar daglig
+                # ombalansering till målvikterna – inte avsaknad av ombalansering.
+                "DAILY_REBALANCING": True,
             }
         ]
     )

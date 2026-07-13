@@ -148,17 +148,6 @@ class EngineInputs:
     base_currency: str = "SEK"
 
 
-def _portfolio_meta_row(portfolio_metadata: pd.DataFrame) -> pd.Series:
-    if portfolio_metadata.empty:
-        raise ValueError("Portfolio_Metadata is empty")
-    row = portfolio_metadata.iloc[0]
-    if pd.isna(row["Portfolio_Name"]) or pd.isna(row["Index_Start_Date"]) or pd.isna(
-        row["Initial_Index_Value"]
-    ):
-        raise ValueError("Portfolio_Metadata has null required values")
-    return row
-
-
 def _portfolio_name_col(df: pd.DataFrame) -> str | None:
     for col in ("Portfolio_Name", COL_PORTFOLJ, "Portfolj", "Portfolio"):
         if col in df.columns:
@@ -569,7 +558,9 @@ def _real_position_state(
     effective_shares = shares_isin[real_isins].copy()
     contributions = pd.DataFrame(index=prices.index, columns=real_isins, dtype=float)
     price_base_df = pd.DataFrame(index=prices.index, columns=real_isins, dtype=float)
-    debug_dates = [pd.Timestamp("2024-01-08"), pd.Timestamp("2024-01-09")]
+    debug_dates = [
+        pd.Timestamp(d.strip()) for d in os.getenv("PORTFOLIO_DEBUG_DATES", "").split(",") if d.strip()
+    ]
 
     for isin in real_isins:
         ticker = str(isin_to_ticker.loc[isin]).strip()
@@ -729,11 +720,9 @@ def _real_portfolio_returns(
         )
         tx_belopp_base = pd.to_numeric(belopp_base, errors="coerce").fillna(0.0).astype(float)
 
-        belopp_sum_raw = belopp.groupby(tx[COL_EFFECTIVE_DATE]).sum().reindex(values.index).fillna(0.0)
         belopp_sum = tx_belopp_base.groupby(tx[COL_EFFECTIVE_DATE]).sum().reindex(values.index).fillna(0.0)
         cashflow = -belopp_sum
     else:
-        belopp_sum_raw = pd.Series(0.0, index=values.index)
         belopp_sum = pd.Series(0.0, index=values.index)
         cashflow = pd.Series(0.0, index=values.index)
 
@@ -875,23 +864,8 @@ def _real_portfolio_returns(
             "See log output for transaction and price-alignment diagnostics."
         )
 
-    d2 = pd.Timestamp("2026-02-18")
-    if DEBUG_ENABLED and d2 in ret.index and str(portfolio_name or "").strip().upper() == "EGEN":
-        logger.info(
-            (
-                "TWR debug %s EGEN: sum(Belopp)_raw=%.6f sum(belopp_base)_SEK=%.6f "
-                "CF_t=%.6f MV_prev=%.6f MV_t=%.6f ret_t=%.8f"
-            ),
-            d2.date().isoformat(),
-            float(belopp_sum_raw.loc[d2]) if pd.notna(belopp_sum_raw.loc[d2]) else 0.0,
-            float(belopp_sum.loc[d2]) if pd.notna(belopp_sum.loc[d2]) else 0.0,
-            float(cashflow.loc[d2]) if pd.notna(cashflow.loc[d2]) else 0.0,
-            float(prev_value.loc[d2]) if pd.notna(prev_value.loc[d2]) else 0.0,
-            float(values.loc[d2]) if pd.notna(values.loc[d2]) else 0.0,
-            float(ret.loc[d2]) if pd.notna(ret.loc[d2]) else 0.0,
-        )
-
     return ret
+
 
 def build_series_definition(
     portfolio_metadata: pd.DataFrame,
@@ -1097,7 +1071,6 @@ def build_portfolios_and_benchmarks(inputs: EngineInputs) -> dict[str, pd.DataFr
             isin_to_ticker = map_df.set_index("ISIN")["Yahoo_Ticker"].to_dict()
             tx_isins = tx_p["ISIN"].dropna().astype(str).str.strip()
             real_tickers = sorted({isin_to_ticker.get(isin, "") for isin in tx_isins if isin_to_ticker.get(isin, "")})
-        prices_real = _portfolio_price_frame(prices, real_tickers, start_date)
         real_fx_tickers = _fx_tickers_for_assets(real_tickers, inputs.mapping, inputs.base_currency)
         prices_real = _portfolio_price_frame(prices, real_tickers, start_date, extra_tickers=real_fx_tickers)
         if prices_real.empty:

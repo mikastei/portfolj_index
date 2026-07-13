@@ -38,7 +38,7 @@ REQUIRED_SHEETS: dict[str, list[str]] = {
         "BASE_CURRENCY",
         "TRADING_DAYS_PER_YEAR",
         "FORWARD_FILL",
-        "NO_REBALANCING",
+        "DAILY_REBALANCING",
     ],
 }
 

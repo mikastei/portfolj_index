@@ -211,6 +211,28 @@ Kvarvarande filer i `tests/`:
 - automatiserade tester for upstream-logik
 - `tests/smoke_test_prices.py` for manuellt tekniskt smoketest av prisnedladdning
 
+## Miljövariabler (strict/debug-lägen)
+
+Fyra flaggor styr strikthet och loggning i upstream-pipelinen. Alla läses via `os.getenv`
+vid modulimport, sätts alltså i skalet före `python -m src.main` (t.ex.
+`PORTFOLIO_STRICT=1 bash run_main.sh`):
+
+| Variabel | Default | Effekt |
+|---|---|---|
+| `PRICE_COVERAGE_STRICT` | `1` (strikt) | I `src/prices.py`: om nagon tickers NaN-andel i prisfonstret overstiger 25 % kastas `ValueError`. Satt till `0` for att nedgradera till en logg-varning istallet (anvands vid felsokning av enstaka glesa serier). |
+| `STRICT_EXTREME_RET` | `1` (strikt) | I `src/portfolio.py`: en extrem daglig avkastning (TWR-utstickare) kastar `ValueError` med fulla diagnostik i loggen. Satt till `0` for att, enbart nar orsaken ar saknade prisdata (`missing_price_tickers`), satta `ret_t=0` for den dagen istallet for att avbryta korningen. |
+| `PORTFOLIO_STRICT` | av (ej strikt) | I `src/portfolio.py`: saknad `price_base` for en aktiv REAL-position loggas som varning och vardebidraget blir 0. Satt till `1` for att i stallet kasta `ValueError` direkt. |
+| `PORTFOLIO_DEBUG` | av | Slar pa detaljerad varderingsdebugloggning per position. Vilka datum som loggas styrs av `PORTFOLIO_DEBUG_DATES` (kommaseparerad lista, t.ex. `2026-02-18,2026-02-19`; tom = inga datum loggas). Anvands vid felsokning, inte i skarp drift. |
+
+**Stallningstagande (AL3):** `PRICE_COVERAGE_STRICT` och `STRICT_EXTREME_RET` failar redan
+hogt som standard, men `PORTFOLIO_STRICT` gor det inte — asymmetriskt. Principiellt bor alla
+tre "hard fail on bad data"-flaggorna vara strikta som standard for att undvika tysta
+felvarderingar. Vi flippar INTE `PORTFOLIO_STRICT`-defaulten i denna lagrisk-batch, eftersom
+det skulle kunna gora en tyst varning i dagens produktionskorning till ett hart fel utan att vi
+forst har verifierat hur ofta `missing_price_base`-varningen faktiskt trigger pa skarp data.
+Rekommendation: kor en produktionsvecka med `PORTFOLIO_STRICT=1` manuellt och granska loggen
+innan defaulten andras i kod.
+
 ## Vanliga fel
 
 ### Saknad mapping
