@@ -93,3 +93,34 @@ def test_price_coverage_strict_disabled_warns_instead_of_raising(monkeypatch, tm
     )
 
     assert out["AAA"].isna().sum() == 3
+
+
+def test_price_coverage_strict_raises_with_forward_fill_on_real_gap(monkeypatch, tmp_path):
+    # Regression för [AX]: med produktionsdefault forward_fill=True fylldes interna
+    # NaN-luckor igen *innan* täckningen mättes, så den strikta kontrollen kunde i
+    # praktiken aldrig lösa ut. Täckningen ska nu mätas på rådata före ffill och
+    # därför fortfarande lösa ut på en riktig prislucka.
+    idx, raw = _sparse_price_frame()
+    monkeypatch.setattr(prices_mod.yf, "download", lambda **kwargs: raw.copy())
+    monkeypatch.delenv("PRICE_COVERAGE_STRICT", raising=False)
+    cache_path = tmp_path / "cache.parquet"
+
+    with pytest.raises(ValueError, match="Too much missing price data"):
+        fetch_prices_yahoo(
+            ["AAA"], idx.min(), idx.max(), forward_fill=True, cache_path=cache_path
+        )
+
+
+def test_forward_fill_still_applied_to_returned_series(monkeypatch, tmp_path):
+    # Täckningen mäts på rådata, men den returnerade serien ska fortfarande vara
+    # forward-fill:ad som förut ([AX] ändrar bara var luckan *mäts*, inte utdatan).
+    idx, raw = _sparse_price_frame()
+    monkeypatch.setattr(prices_mod.yf, "download", lambda **kwargs: raw.copy())
+    monkeypatch.setenv("PRICE_COVERAGE_STRICT", "0")  # annars skulle luckan lösa ut
+    cache_path = tmp_path / "cache.parquet"
+
+    out = fetch_prices_yahoo(
+        ["AAA"], idx.min(), idx.max(), forward_fill=True, cache_path=cache_path
+    )
+
+    assert out["AAA"].isna().sum() == 0

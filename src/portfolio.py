@@ -266,13 +266,71 @@ def _weights_from_fonder(
     return positive / total
 
 
-def _portfolio_returns_from_weights(asset_returns: pd.DataFrame, weights: pd.Series) -> pd.Series:
-    cols = [c for c in weights.index if c in asset_returns.columns]
+def _portfolio_returns_from_weights(
+    prices_base: pd.DataFrame,
+    weights: pd.Series,
+    portfolio_name: str | None = None,
+    label: str = "",
+) -> pd.Series:
+    """Weighted portfolio returns with per-day renormalisation over available funds.
+
+    Tar basvalutapriser (inte färdig-fyllda avkastningar) så att äkta prisluckor
+    kan skiljas från 0 %-dagar. En fond som saknar pris innan den startade (eller i
+    en intern lucka) exkluderas de dagarna och dess vikt fördelas proportionellt om
+    över de fonder som *har* ett pris den dagen. Tidigare sattes avkastningen tyst
+    till 0 % vid full vikt, vilket späde ut portföljavkastningen under fondens
+    för-startperiod och omviktade övriga fonder utan att flagga det ([AL1]).
+    Exkluderade fond/periodspann loggas.
+    """
+    cols = [c for c in weights.index if c in prices_base.columns]
     if not cols:
         raise ValueError("No weighted assets are present in downloaded Yahoo price data")
-    w = weights.loc[cols]
-    w = w / w.sum()
-    return asset_returns[cols].mul(w, axis=1).sum(axis=1)
+    px = prices_base[cols]
+    w = weights.loc[cols].astype(float)
+
+    # Per-fond daglig avkastning, med NaN bevarat där priset saknas.
+    rets = px.pct_change()
+
+    # Närvaro: en fond räknas från sin första giltiga priskurs och framåt. Den
+    # första observationen är fondens basdag → avkastning 0 (inte ett saknat värde).
+    present = pd.DataFrame(False, index=px.index, columns=cols)
+    for c in cols:
+        first_valid = px[c].first_valid_index()
+        if first_valid is None:
+            logger.warning(
+                "%s-viktning: fond=%s saknar prisdata helt i portföljfönstret "
+                "(portfolio=%s); exkluderas ur hela serien och dess vikt fördelas om",
+                label or "CUR/TGT",
+                c,
+                portfolio_name,
+            )
+            continue
+        present[c] = px.index >= first_valid
+        pre = px.index[px.index < first_valid]
+        if len(pre) > 0:
+            logger.warning(
+                "%s-viktning: fond=%s saknar pris före start; exkluderad %s→%s "
+                "(%d handelsdag(ar)), vikt fördelas om (portfolio=%s)",
+                label or "CUR/TGT",
+                c,
+                pre.min().date().isoformat(),
+                pre.max().date().isoformat(),
+                len(pre),
+                portfolio_name,
+            )
+
+    present = present.astype(bool)
+    # Frånvarande → NaN; närvarande men NaN (basdag / luckkant) → 0.
+    rets = rets.where(present)
+    rets = rets.mask(present & rets.isna(), 0.0)
+
+    # Vikta bara över fonder med giltig avkastning den dagen och normera om till 1.
+    available = rets.notna()
+    weight_matrix = available.mul(w, axis=1)
+    weight_sum = weight_matrix.sum(axis=1)
+    norm_weights = weight_matrix.div(weight_sum.replace(0.0, np.nan), axis=0)
+    port = (rets.fillna(0.0) * norm_weights.fillna(0.0)).sum(axis=1)
+    return port.where(weight_sum > 0, 0.0)
 
 
 def _currency_map_from_mapping(
@@ -1119,7 +1177,9 @@ def build_portfolios_and_benchmarks(inputs: EngineInputs) -> dict[str, pd.DataFr
             cur_fx_tickers = _fx_tickers_for_assets(cur_assets, inputs.mapping, inputs.base_currency)
             prices_cur = _portfolio_price_frame(prices, cur_assets, start_date, extra_tickers=cur_fx_tickers)
             prices_cur_base = _prices_to_base(prices_cur, cur_assets, inputs.mapping, inputs.base_currency)
-            cur_ret = _portfolio_returns_from_weights(returns_from_prices(prices_cur_base), cur_w)
+            cur_ret = _portfolio_returns_from_weights(
+                prices_cur_base, cur_w, portfolio_name=portfolio_name, label="CUR"
+            )
             out[f"PORT_{slug(portfolio_name)}_CUR"] = _series_frame(cur_ret, initial_index_value)
         except ValueError as exc:
             if "Portfolio has no weights" in str(exc):
@@ -1133,7 +1193,9 @@ def build_portfolios_and_benchmarks(inputs: EngineInputs) -> dict[str, pd.DataFr
             tgt_fx_tickers = _fx_tickers_for_assets(tgt_assets, inputs.mapping, inputs.base_currency)
             prices_tgt = _portfolio_price_frame(prices, tgt_assets, start_date, extra_tickers=tgt_fx_tickers)
             prices_tgt_base = _prices_to_base(prices_tgt, tgt_assets, inputs.mapping, inputs.base_currency)
-            tgt_ret = _portfolio_returns_from_weights(returns_from_prices(prices_tgt_base), tgt_w)
+            tgt_ret = _portfolio_returns_from_weights(
+                prices_tgt_base, tgt_w, portfolio_name=portfolio_name, label="TGT"
+            )
             out[f"PORT_{slug(portfolio_name)}_TGT"] = _series_frame(tgt_ret, initial_index_value)
         except ValueError as exc:
             if "Portfolio has no weights" in str(exc):

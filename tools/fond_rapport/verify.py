@@ -29,11 +29,16 @@ from .window import BASE_INDEX, Horizon, ONE_YEAR_DAYS, rebase_series
 ABS_TOLERANCE = 1e-9
 REL_TOLERANCE = 1e-6
 
-# Kända slutnivåer per 2026-07-06, avlästa ur upstream-bygget 2026-07-07 efter
-# full prisomhämtning (sena fond-NAV-revideringar flyttade PA 125,9→126,6 och
-# EGEN 121,3→121,4 relativt bygget 2026-07-04; historiken före 2026-06-30 är
-# identisk). Kontrollerar hela källserien (ej as-of-skuren) som filintegritetsguard.
-REAL_ANCHORS = {"PORT_PA_REAL": 126.6, "PORT_EGEN_REAL": 121.4}
+# Kända slutnivåer, avlästa ur produktionsbygget som en filintegritetsguard (hela
+# källserien, ej as-of-skuren). Uppdateras när priser drivit ankaret utanför
+# toleransen och rörelsen är bekräftat legitim marknadsrörelse (inte fel fil/glitch).
+# - EGEN 121,4: per 2026-07-06, bygget 2026-07-07 (sena fond-NAV-revideringar
+#   flyttade EGEN 121,3→121,4 relativt bygget 2026-07-04).
+# - PA 126,0: uppdaterad 2026-07-13 från 126,6 (per 2026-07-06). Bekräftad drift –
+#   PA_REAL 126,60→125,99 över 2026-07-06→07-10 (−0,48 %), identisk med PA_TGT
+#   (−0,47 %) och PA_CUR, gradvis utan dagsspik; divergensen mot POLICY_PA är
+#   EM/tematik-släpet mot ACWI (samma mönster i EGEN_REAL). Toleransen oförändrad.
+REAL_ANCHORS = {"PORT_PA_REAL": 126.0, "PORT_EGEN_REAL": 121.4}
 ANCHOR_TOLERANCE = 0.5
 REBASE_TOLERANCE = 1e-9
 

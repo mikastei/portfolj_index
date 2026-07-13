@@ -73,3 +73,51 @@ def test_compute_kpis_computes_risk_metrics_with_enough_obs():
 def test_compute_kpis_raises_on_empty_frame():
     with pytest.raises(ValueError, match="empty period frame"):
         compute_kpis(pd.DataFrame(), rf_rate_annual=0.0, trading_days_per_year=252)
+
+
+def _year_boundary_frame():
+    # Sista handelsdagen 2025 + två handelsdagar 2026, +5 % per dag.
+    dates = pd.to_datetime(["2025-12-31", "2026-01-02", "2026-01-05"])
+    idx = pd.Series([100.0, 105.0, 110.25], index=dates)
+    ret = idx.pct_change().fillna(0.0)
+    dd = idx / idx.cummax() - 1.0
+    return pd.DataFrame({"Date": dates, "RET": ret.values, "IDX": idx.values, "DD": dd.values})
+
+
+def test_slice_period_ytd_anchors_to_previous_year_close():
+    # [AL2]: YTD-fönstret innehåller bara 2026-raderna, men returen ska ankras mot
+    # föregående års sista IDX så att första handelsdagens uppgång kommer med.
+    sliced = slice_period(_year_boundary_frame(), "YTD")
+    assert sliced.anchor_idx == pytest.approx(100.0)
+    assert sliced.anchor_date == pd.Timestamp("2025-12-31")
+    assert list(sliced.frame["Date"]) == [pd.Timestamp("2026-01-02"), pd.Timestamp("2026-01-05")]
+    # Ankrad total return = 110.25 / 100 - 1 (inkluderar 2026-01-02).
+    assert compute_total_return(sliced.frame, sliced.anchor_idx) == pytest.approx(0.1025)
+    # Utan ankare tappas första dagens avkastning (gamla off-by-one-beteendet).
+    assert compute_total_return(sliced.frame) == pytest.approx(110.25 / 105.0 - 1.0)
+
+
+def test_slice_period_since_start_has_no_anchor():
+    sliced = slice_period(_series_frame(10), "Since_Start")
+    assert sliced.anchor_idx is None
+    assert sliced.anchor_date is None
+
+
+def test_ytd_row_appears_in_early_january_with_few_obs():
+    # [AL2]: tidigare krävdes 20 obs, så YTD/30D saknades nästan hela januari.
+    sliced = slice_period(_year_boundary_frame(), "YTD")
+    assert len(sliced.frame) == 2
+    assert has_minimum_observations(sliced.frame, "YTD") is True
+    assert has_minimum_observations(sliced.frame, "30D") is True
+
+
+def test_compute_kpis_uses_anchor_for_return():
+    sliced = slice_period(_year_boundary_frame(), "YTD")
+    kpis = compute_kpis(
+        sliced.frame,
+        rf_rate_annual=0.0,
+        trading_days_per_year=252,
+        anchor_idx=sliced.anchor_idx,
+        anchor_date=sliced.anchor_date,
+    )
+    assert kpis["Return_Total"] == pytest.approx(0.1025)

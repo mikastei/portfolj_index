@@ -33,8 +33,9 @@ from .costs import compute_costs, verify_costs
 from .data import BIData, check_contract, load_bi_data
 from .metrics import window_kpi_table
 from .policy import compute_policy_regressions
-from .report import build_html
+from .report import PORTFOLIOS, build_html
 from .risk import MODEL_GAP_WARN, compute_risk
+from .sleeve import run_sleeve_attribution
 from .verify import verify_kpis
 from .window import build_horizons, derive_inception, resolve_as_of
 
@@ -193,6 +194,18 @@ def main(argv: list[str] | None = None) -> int:
                 f"({reg.n_obs} obs) – beta/alfa {gate}{prelim}"
             )
 
+    sleeve_attributions = run_sleeve_attribution(data, PORTFOLIOS, inception, as_of, horizons)
+    for portfolio, sleeve in sleeve_attributions.items():
+        ref = next((p for p in sleeve.periods if p.period_key == "Since_Start"), None)
+        if ref is not None:
+            print(
+                f"Högrisk-sleeve {portfolio} ({'+'.join(sleeve.categories)}): "
+                f"{ref.label} sleeve {ref.sleeve_return * 100:+.2f} % mot ACWI "
+                f"{ref.acwi_return * 100:+.2f} % = mer {ref.excess * 100:+.2f} p.e.; "
+                f"snittvikt {ref.avg_weight * 100:.1f} % → bidrag "
+                f"{ref.contribution * 100:+.2f} p.e."
+            )
+
     costs = compute_costs(data, inception, as_of)
     costs_verification = verify_costs(data, costs)
     egen_ter, pa_ter = costs.ter["EGEN"], costs.ter["PA"]
@@ -222,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
         costs_verification,
         risks,
         policy_regressions,
+        sleeve_attributions,
     )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)

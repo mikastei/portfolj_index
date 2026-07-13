@@ -21,6 +21,7 @@ from .data import BIData, series_index
 from .metrics import KPI_COLUMNS as METRIC_KPIS
 from .policy import R2_THRESHOLD, PolicyRegression
 from .risk import MODEL_GAP_WARN, PortfolioRiskWindow
+from .sleeve import HIGH_RISK_CATEGORIES, SleeveAttribution
 from .verify import VerificationResult
 from .window import Horizon, rebase_series
 
@@ -925,6 +926,95 @@ räknas därför inte alls här, i stället för att räknas orent.</p>
     return method + sections
 
 
+def _sleeve_portfolio_block(sleeve: SleeveAttribution) -> str:
+    """Tabell + slutsats för en portföljs högrisk-sleeve mot ACWI."""
+    cat_text = " + ".join(html.escape(c) for c in sleeve.categories)
+    rows = "".join(
+        "<tr><td>{}<br><span class=\"sub\">{}<br>{}</span></td>"
+        "<td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
+            html.escape(p.label),
+            "kumulativ" if p.measure == "cumulative" else "CAGR",
+            p.date_range,
+            fmt_pct(p.sleeve_return),
+            fmt_pct(p.acwi_return),
+            fmt_pp(p.excess, 2),
+            fmt_pct(p.avg_weight),
+            fmt_pp(p.contribution, 2),
+        )
+        for p in sleeve.periods
+    )
+    table = (
+        "<table><thead><tr><th>Horisont</th><th>Sleeve-avkastning</th><th>ACWI (proxy)</th>"
+        "<th>Meravkastning</th><th>Sleevens snittvikt</th><th>Bidrag ≈ vikt × mer</th>"
+        f"</tr></thead><tbody>{rows}</tbody></table>"
+    )
+
+    # Slutsatsen ankras i den längsta tillgängliga horisonten (helst sedan start).
+    ref = next((p for p in sleeve.periods if p.period_key == "Since_Start"), None)
+    if ref is None:
+        ref = sleeve.periods[-1] if sleeve.periods else None
+    if ref is None:
+        verdict = "<p>Ingen horisont är tillgänglig för sleeve-jämförelsen.</p>"
+    elif ref.excess >= 0:
+        verdict = (
+            f"<p><strong>Slutsats ({html.escape(ref.label.lower())}):</strong> högrisk-sleeven "
+            f"({cat_text}) har <strong>slagit</strong> ACWI med {fmt_pp(ref.excess, 2)} "
+            f"och bidragit {fmt_pp(ref.contribution, 2)} till totalportföljen vid en snittvikt "
+            f"på {fmt_pct(ref.avg_weight)} – de tematiska/EM-positionerna har betalat sig mot "
+            f"alternativet att ligga i aktiebucketen.</p>"
+        )
+    else:
+        verdict = (
+            f"<p><strong>Slutsats ({html.escape(ref.label.lower())}):</strong> högrisk-sleeven "
+            f"({cat_text}) har <strong>underpresterat</strong> ACWI med {fmt_pp(ref.excess, 2)} "
+            f"och dragit ned totalportföljen {fmt_pp(ref.contribution, 2)} vid en snittvikt på "
+            f"{fmt_pct(ref.avg_weight)} – de tematiska/EM-positionerna har hittills <em>inte</em> "
+            f"betalat sig mot alternativet att ligga i aktiebucketen.</p>"
+        )
+
+    missing_note = ""
+    if sleeve.missing_categories:
+        miss = ", ".join(html.escape(c) for c in sleeve.missing_categories)
+        missing_note = (
+            f'<div class="warn"><p>{html.escape(sleeve.portfolio)} håller inte '
+            f"kategorin/kategorierna {miss}; sleeven mäts på de högrisk-kategorier "
+            "som faktiskt hålls.</p></div>"
+        )
+    return f"<h4>{html.escape(sleeve.portfolio)} – högrisk-sleeve mot ACWI</h4>{verdict}{table}{missing_note}"
+
+
+def _sleeve_section(sleeve_attributions: dict[str, SleeveAttribution] | None) -> str:
+    """Avsnitt 5-underblock: betalar sig högrisk-innehaven mot ACWI?"""
+    heading = (
+        "<h3>Högrisk-sleeve: betalar sig de tematiska och EM-positionerna mot ACWI?</h3>"
+    )
+    if not sleeve_attributions:
+        return (
+            f"{heading}<div class=\"warn\"><p>Högrisk-sleeve-attributionen kunde inte "
+            "beräknas: ingen portfölj har innehav i högrisk-kategorierna, eller BI-filen "
+            "saknar kategoriserierna/ACWI-proxyn.</p></div>"
+        )
+    cats = " och ".join(html.escape(c) for c in HIGH_RISK_CATEGORIES)
+    intro = (
+        f"<p>Sleeven samlar EGEN:s högrisk-innehav – kategorierna {cats} – och mäter deras "
+        "avkastning mot <strong>ACWI</strong> (policyindexets aktiebucket, i SEK) som "
+        "<em>alternativkostnad</em>: vad kapitalet hade gett om det i stället legat i den "
+        "breda aktiebucketen. Sleevens avkastning är den värdeviktade delportföljen av "
+        "kategoriserierna (månadskonstanta vikter, samma konvention som attributionen ovan). "
+        "<em>Bidrag</em> ≈ sleevens snittvikt × meravkastning och uttrycker alternativkostnaden "
+        "i procentenheter av totalportföljen. Ingen ny bucket införs i policyreferensen – "
+        "det finns ingen trovärdig passiv proxy för tematiska/sektorfonder som grupp, så ACWI "
+        "används enbart som jämförelsealternativ. Måttet (kumulativ/CAGR) följer horisonten "
+        "som i avsnitt 2.</p>"
+    )
+    blocks = "".join(
+        _sleeve_portfolio_block(sleeve_attributions[p])
+        for p in PORTFOLIOS
+        if p in sleeve_attributions
+    )
+    return heading + intro + blocks
+
+
 def _attribution_verification_section(
     attributions: dict[str, PortfolioAttribution] | None,
 ) -> str:
@@ -1037,6 +1127,7 @@ def build_html(
     costs_verification: pd.DataFrame | None = None,
     risks: dict[str, list[PortfolioRiskWindow]] | None = None,
     policy_regressions: dict[str, PolicyRegression] | None = None,
+    sleeve_attributions: dict[str, SleeveAttribution] | None = None,
 ) -> str:
     """Sätt ihop hela rapporten till en självbärande HTML-sträng."""
     if costs is None:
@@ -1110,6 +1201,7 @@ tabellerna deskriptivt.</p></div>
 
 <h2>5. Attribution – varifrån kommer gapet mot den egna listan?</h2>
 {_attribution_section(attributions)}
+{_sleeve_section(sleeve_attributions)}
 
 <h2>6. Avgifter och kostnader – den strukturella motvinden (Steg 2b)</h2>
 {_costs_section(costs, kpi)}

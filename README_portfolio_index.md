@@ -73,6 +73,13 @@ Serietyper:
 - `REAL` = faktisk portfoljutveckling fran transaktioner
 - `CUR` = modellportfolj baserad pa aktuella vikter
 - `TGT` = modellportfolj baserad pa malvikter
+
+  CUR/TGT viktas per dag och normeras om over de fonder som faktiskt har ett pris den
+  dagen ([AL1], 2026-07). En fond som saknar pris innan den startade exkluderas de
+  dagarna och dess vikt fordelas proportionellt om over ovriga fonder. Tidigare sattes
+  avkastningen tyst till 0 % vid full vikt, vilket spade ut portfoljavkastningen under
+  fondens for-startperiod och omviktade ovriga utan flagga. Exkluderade fond/periodspann
+  loggas som `CUR/TGT-viktning: fond=… saknar pris fore start …`.
 - `BM` = benchmarkserie
 - `AST` = underliggande tillgangsserie som anvands internt i motorn
 
@@ -219,7 +226,7 @@ vid modulimport, sätts alltså i skalet före `python -m src.main` (t.ex.
 
 | Variabel | Default | Effekt |
 |---|---|---|
-| `PRICE_COVERAGE_STRICT` | `1` (strikt) | I `src/prices.py`: om nagon tickers NaN-andel i prisfonstret overstiger 25 % kastas `ValueError`. Satt till `0` for att nedgradera till en logg-varning istallet (anvands vid felsokning av enstaka glesa serier). |
+| `PRICE_COVERAGE_STRICT` | `1` (strikt) | I `src/prices.py`: om nagon tickers NaN-andel i prisfonstret overstiger 25 % kastas `ValueError`. NaN-andelen mats pa **radata fore forward-fill** ([AX], 2026-07): tidigare kordes ffill (produktionsdefault) forst, vilket fyllde igen interna prisluckor innan den strikta kontrollen hann se dem — kontrollen kunde da i praktiken aldrig losa ut. Fonstret raknas fran varje tickers forsta giltiga kurs, sa ledande luckor innan en fond startade raknas inte (endast luckor *inom* fondens aktiva period). Satt till `0` for att nedgradera till en logg-varning istallet (anvands vid felsokning av enstaka glesa serier). |
 | `STRICT_EXTREME_RET` | `1` (strikt) | I `src/portfolio.py`: en extrem daglig avkastning (TWR-utstickare) kastar `ValueError` med fulla diagnostik i loggen. Satt till `0` for att, enbart nar orsaken ar saknade prisdata (`missing_price_tickers`), satta `ret_t=0` for den dagen istallet for att avbryta korningen. |
 | `PORTFOLIO_STRICT` | av (ej strikt) | I `src/portfolio.py`: saknad `price_base` for en aktiv REAL-position loggas som varning och vardebidraget blir 0. Satt till `1` for att i stallet kasta `ValueError` direkt. |
 | `PORTFOLIO_DEBUG` | av | Slar pa detaljerad varderingsdebugloggning per position. Vilka datum som loggas styrs av `PORTFOLIO_DEBUG_DATES` (kommaseparerad lista, t.ex. `2026-02-18,2026-02-19`; tom = inga datum loggas). Anvands vid felsokning, inte i skarp drift. |
