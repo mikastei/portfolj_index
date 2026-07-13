@@ -93,8 +93,9 @@ bash run_bi.sh
 Principer for BI v1:
 
 - laser gemensam kalla: `data/portfolio_output_timeseries.xlsx`
-- bygger egen downstream-artefakt: `data/portfolio_bi_data.xlsx`
-- publicerar atomiskt till SharePoint `03_Utdata/portfolio_bi_data.xlsx` for Power BI-konsumtion
+- bygger egen downstream-artefakt och skriver den till den lokala dataroten,
+  `/Users/mikael/Fondanalys-Data/03_Utdata/portfolio_bi_data.xlsx` (styrs av `bi_data_local_output`
+  i `config.toml`); en nattlig backup speglar filen vidare till OneDrive/SharePoint for Power BI
 - raknar KPI:er i Python, inte i DAX
 - ateranvander inte Excel/dashboard-artefakter
 
@@ -159,8 +160,7 @@ BI-spar:
 - `src/bi_prep.py`
 - `src/bi_io.py`
 - `src/bi_metrics.py`
-- `data/portfolio_bi_data.xlsx`
-- `03_Utdata/portfolio_bi_data.xlsx` (publicerad till SharePoint)
+- `/Users/mikael/Fondanalys-Data/03_Utdata/portfolio_bi_data.xlsx` (lokal datarot, styrs av `bi_data_local_output` i `config.toml`)
 
 Viktig princip:
 
@@ -168,21 +168,21 @@ Viktig princip:
 - BI-sparet konsumerar endast denna kalla
 - inget kvarvarande steg ska bero pa tidigare Excel/dashboard-artefakter
 
-## Bryggintegration (2026-04-28)
+## Integration med Fondanalys.xlsm (vag B, sedan cutover 2026-06-30)
 
-Skarp drift gar via SharePoint-bryggan, inte manuell korning. VBA-knappen "Kor Portfoljindex" i `Fondanalys.xlsm` (Modul5) skriver en trigger:
+Den gamla SharePoint-bryggan (`_Bridge/`-triggerfiler, launchd-poller, status-JSON) ar avvecklad
+sedan juni 2026 och finns inte langre i drift. Skarp korning triggas nu synkront: VBA-knappen
+"Uppdatera Power BI data" i `Fondanalys.xlsm` (`Modul_Bridge.UppdateraPowerBI`) anropar
+`AppleScriptTask FaBI.scpt` och vantar in resultatet. Scriptet kor `fa-bi.sh`, som i sin tur kor
+`bash run_all.sh` i detta repo (`src.main` -> `src.bi_prep`), loggar till
+`Fondanalys-Data/_exchange/logs/` och skriver BI-filen lokalt till `03_Utdata/`.
 
-```
-_Bridge/triggers/portfoljindex_<unix>_<id>.json
-```
-
-`bridge_orchestrator`-pollern pa Mac-AI (launchd, var 30 s) plockar upp triggern, kor `bash run_all.sh` (upstream + BI) och skriver status till:
-
-```
-_Bridge/status/portfoljindex.json
-```
-
-BI-output publiceras atomiskt till `03_Utdata/portfolio_bi_data.xlsx` pa SharePoint. Bryggans implementation lever i Fondanalys-repots `apps/bridge_orchestrator/`.
+Utover knapptriggern kor launchd-jobbet `com.emsek.fondanalys.scheduled` en full pipeline
+nattligt (06:00), oberoende av VBA-knappen. Ett separat nattligt backup-jobb
+(`com.emsek.fondanalys.backup`, 02:30) speglar `03_Utdata/portfolio_bi_data.xlsx` till
+OneDrive/SharePoint for Power BI Desktop pa Windows — detta sker automatiskt, inte som ett
+manuellt steg. Bade schemaläggning och backup-jobb ligger i Fondanalys-repots
+`apps/bridge_orchestrator/` respektive `apps/backup/`, inte i detta repo.
 
 ## Sekventiell korning (manuell)
 

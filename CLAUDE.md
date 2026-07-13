@@ -86,33 +86,46 @@ Portföljindex/
 
 **BI (src.bi_prep):**
 - Läser `data/portfolio_output_timeseries.xlsx`
-- Bygger `data/portfolio_bi_data.xlsx`
-- Publicerar atomiskt till SharePoint `03_Utdata/portfolio_bi_data.xlsx` för Power BI-konsumtion
+- Bygger BI-arbetsboken och skriver den till den lokala dataroten,
+  `/Users/mikael/Fondanalys-Data/03_Utdata/portfolio_bi_data.xlsx`
+  (styrs av `bi_data_local_output` i `config.toml`)
 
 Viktigt: BI-spåret läser **enbart** upstream-outputen, aldrig indatafilerna direkt.
 
 ---
 
-## Bryggintegration (2026-04-28)
+## Integration med Fondanalys.xlsm (väg B, sedan cutover 2026-06-30)
 
-Detta projekt körs inte fristående i drift – det triggas av VBA-knapp i
-`Fondanalys.xlsm` (Modul5) via SharePoint-bryggan:
+Bryggarkitekturen (`_Bridge/`-triggerfiler, launchd-poller, `bridge_orchestrator`-status-JSON)
+avvecklades i juni 2026 ([AB]-avvecklingen, se `rollback/bridge-pre-ab`-taggen). Ingen del av
+den finns kvar i drift. Dagens flöde är direkt och synkront, utan mellanlagrad kö:
 
 ```
-VBA i Fondanalys.xlsm
-   └─► _Bridge/triggers/portfoljindex_<unix>_<id>.json
+VBA i Fondanalys.xlsm (knapp "Uppdatera Power BI data", Modul_Bridge.UppdateraPowerBI)
+   └─► AppleScriptTask FaBI.scpt (synkront, VBA väntar in resultatet)
                   │
                   ▼
-       launchd-poller på Mac-AI (var 30 s)
+       fa-bi.sh  →  bash run_all.sh   (src.main → src.bi_prep, i detta repo)
                   │
-                  ▼
-       bash run_all.sh   (src.main → src.bi_prep)
-                  │
-                  ├─► _Bridge/status/portfoljindex.json
-                  └─► 03_Utdata/portfolio_bi_data.xlsx (atomic publish)
+                  ├─► loggar till Fondanalys-Data/_exchange/logs/
+                  └─► skriver lokalt till Fondanalys-Data/03_Utdata/portfolio_bi_data.xlsx
 ```
 
-Bryggans orkestrering (poller, jobs, status, heartbeat, scheduled, logrotation) ligger i Fondanalys-repots `apps/bridge_orchestrator/` – inte i detta repo. Manuell körning på Mac-AI med `run_*.sh`-skripten fungerar parallellt och används primärt vid felsökning.
+Indata (`transaktioner.xlsx`, `fonder.xlsx`) läses direkt från den lokala dataroten
+(`02_Indata/` resp. `_exchange/`) via `config.toml` – inget separat exchange-lager i detta repo.
+
+Utöver knapptriggern kör launchd-jobbet `com.emsek.fondanalys.scheduled` en full pipeline
+nattligt (06:00) oberoende av VBA-knappen. Detta och övriga schemalagda jobb
+(`usa-exposure`, `logrotation`, nattlig OneDrive-backup av BI-filen) hanteras i
+Fondanalys-repots `apps/bridge_orchestrator/` respektive `apps/backup/` – inte i detta repo.
+Manuell körning på Mac-AI med `run_*.sh`-skripten fungerar parallellt och används primärt
+vid felsökning.
+
+**OBS – SharePoint/OneDrive-kopian:** Power BI Desktop på Windows läser en OneDrive-synkad
+kopia av BI-filen. Den kopian sköts av ett automatiskt nattligt backup-jobb
+(`com.emsek.fondanalys.backup`, 02:30) som speglar den lokala `03_Utdata/`-filen – det är
+**inte** ett manuellt steg. Verifiera dock att detta backup-jobb faktiskt pekar mot den
+uppdaterade lokala filen om SharePoint-innehållet någon gång verkar liggande efter.
 
 Datakontrakt: schema_version=1 enligt `_Claude_Output/260426_Design_Steg3_Kontrakt.md` i Fondanalys-OneDrive.
 
@@ -162,6 +175,6 @@ git push
 - Koden är ändrad och fungerar som avsett
 - config.toml används för alla externa sökvägar
 - Inga Windows-sökvägar finns kvar
-- Skrivningar till `_Bridge/` eller `03_Utdata/` använder atomic publish-mönstret
+- Skrivningar till den lokala dataroten (`Fondanalys-Data/03_Utdata/` m.fl.) sker via giltiga sökvägar i `config.toml`, aldrig hårdkodat
 - Commit gjord med tydligt meddelande
 - Antaganden är redovisade
