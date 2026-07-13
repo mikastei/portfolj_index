@@ -119,15 +119,21 @@ def _instrument_mapping(bi: BIData) -> pd.DataFrame:
     return mapping
 
 
+def _fund_base_prices_sek(
+    bi: BIData, tickers: list[str], start: pd.Timestamp, price_cache: pd.DataFrame
+) -> pd.DataFrame:
+    """SEK-baspriser per fond, exakt enligt upstreams konstruktion."""
+    mapping = _instrument_mapping(bi)
+    fx = _fx_tickers_for_assets(tickers, mapping, "SEK")
+    px = _portfolio_price_frame(price_cache, tickers, start, extra_tickers=fx)
+    return _prices_to_base(px, tickers, mapping, "SEK")
+
+
 def _fund_daily_returns_sek(
     bi: BIData, tickers: list[str], start: pd.Timestamp, price_cache: pd.DataFrame
 ) -> pd.DataFrame:
     """Dagliga SEK-avkastningar per fond, exakt enligt upstreams konstruktion."""
-    mapping = _instrument_mapping(bi)
-    fx = _fx_tickers_for_assets(tickers, mapping, "SEK")
-    px = _portfolio_price_frame(price_cache, tickers, start, extra_tickers=fx)
-    px_base = _prices_to_base(px, tickers, mapping, "SEK")
-    return returns_from_prices(px_base)
+    return returns_from_prices(_fund_base_prices_sek(bi, tickers, start, price_cache))
 
 
 def _compound(returns: pd.Series) -> float:
@@ -200,8 +206,14 @@ def compute_attribution(
     series_start = pd.to_datetime(ref_meta["Include_From_Date"])
     idx0 = float(ref_meta["Initial_Index_Value"])
 
-    fund_rets = _fund_daily_returns_sek(bi, list(w_ref_fund.index), series_start, price_cache)
-    ref_ret_daily = _portfolio_returns_from_weights(fund_rets, w_ref_fund)
+    ref_px_base = _fund_base_prices_sek(bi, list(w_ref_fund.index), series_start, price_cache)
+    fund_rets = returns_from_prices(ref_px_base)
+    # Samma per-dag-omviktning över tillgängliga fonder som upstream använder för
+    # TGT ([AL1]); tar baspriser, inte färdiga avkastningar. Måste matcha upstreams
+    # TGT-IDX inom REPLICATION_TOLERANCE (verifieras nedan).
+    ref_ret_daily = _portfolio_returns_from_weights(
+        ref_px_base, w_ref_fund, portfolio_name=portfolio, label=REFERENCE_VARIANT
+    )
     ref_ret_daily.iloc[0] = 0.0
     ref_idx_replicated = idx0 * (1.0 + ref_ret_daily).cumprod()
     ref_idx_bi = _series_idx(bi, f"PORT_{portfolio}_{REFERENCE_VARIANT}")

@@ -192,19 +192,28 @@ def fetch_prices_yahoo(
             int(weekend.sum()),
         )
         merged = merged.loc[~weekend]
+    window_mask = (merged.index >= start_ts) & (merged.index < end_exclusive)
+    # Täckningskontrollen (PRICE_COVERAGE_STRICT) måste mäta prisluckor på RÅDATA,
+    # innan forward-fill fyller igen dem. Görs mätningen efter ffill suddas interna
+    # NaN-luckor ut och den strikta kontrollen kan i praktiken aldrig lösa ut ([AX]).
+    # Vi fryser därför ett ofyllt fönster för mätningen och forward-fillar först
+    # efteråt. Den returnerade/cachade serien är fortsatt ffill:ad som förut.
+    prices_raw = merged.loc[window_mask, clean].copy()
+
     if forward_fill:
         merged[clean] = merged[clean].ffill()
 
-    prices = merged.loc[(merged.index >= start_ts) & (merged.index < end_exclusive), clean].copy()
+    prices = merged.loc[window_mask, clean].copy()
     if prices.empty:
         raise ValueError("Price fetch resulted in empty period after slicing")
     if not prices.index.is_monotonic_increasing:
         prices = prices.sort_index()
+        prices_raw = prices_raw.sort_index()
 
     strict_coverage = os.getenv("PRICE_COVERAGE_STRICT", "1") != "0"
     coverage_rows: list[dict[str, object]] = []
     for ticker in clean:
-        s = prices[ticker]
+        s = prices_raw[ticker]
         first_valid = s.first_valid_index()
         if first_valid is None:
             raise ValueError(f"No price data for ticker {ticker}")

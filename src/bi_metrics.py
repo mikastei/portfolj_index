@@ -8,10 +8,16 @@ import numpy as np
 import pandas as pd
 
 PERIOD_ORDER = ["Since_Start", "YTD", "30D", "1Y"]
+# Minsta antal observationer för att en periodrad ska existera. YTD och 30D sänktes
+# från 20 till 2 ([AL2]): tröskeln på ~20 handelsdagar gjorde att YTD/30D saknades
+# under nästan hela januari (för få dagar in på året). Fönsterreturen ankras nu mot
+# föregående dags IDX, så redan 2 observationer ger ett korrekt periodtal. Riskmåtten
+# (Vol/Sharpe/…) har en egen tröskel (RISK_MIN_RET_OBS) och sätts till NaN när
+# historiken är för kort – raden visas då med return men utan missvisande riskmått.
 PERIOD_MIN_OBS = {
     "Since_Start": 2,
-    "YTD": 20,
-    "30D": 20,
+    "YTD": 2,
+    "30D": 2,
     "1Y": 126,
 }
 RISK_MIN_RET_OBS = 20
@@ -24,6 +30,12 @@ class PeriodSlice:
     period: str
     frame: pd.DataFrame
     latest_date: pd.Timestamp
+    # IDX/datum för sista observationen *före* fönstrets start (föregående dag).
+    # Fönsterreturen mäts från detta ankare i stället för från första raden i
+    # fönstret, vilket annars tappar fönstrets första dags avkastning ([AL2]).
+    # None för Since_Start och när ingen historik finns före fönstret.
+    anchor_idx: float | None = None
+    anchor_date: pd.Timestamp | None = None
 
 
 def prepare_series_frame(series_frame: pd.DataFrame) -> pd.DataFrame:
@@ -59,11 +71,26 @@ def slice_period(series_frame: pd.DataFrame, period: str) -> PeriodSlice:
         raise ValueError("Cannot slice an empty series frame")
     latest_date = frame["Date"].max()
     start_date = _period_start(latest_date, period)
+    anchor_idx: float | None = None
+    anchor_date: pd.Timestamp | None = None
     if start_date is None:
         window = frame.copy()
     else:
         window = frame[(frame["Date"] >= start_date) & (frame["Date"] <= latest_date)].copy()
-    return PeriodSlice(period=period, frame=window.reset_index(drop=True), latest_date=latest_date)
+        # Ankra fönsterreturen mot sista observationen *före* fönstret ([AL2]).
+        before = frame[frame["Date"] < start_date]
+        if not before.empty:
+            anchor_row = before.iloc[-1]
+            if pd.notna(anchor_row["IDX"]):
+                anchor_idx = float(anchor_row["IDX"])
+                anchor_date = anchor_row["Date"]
+    return PeriodSlice(
+        period=period,
+        frame=window.reset_index(drop=True),
+        latest_date=latest_date,
+        anchor_idx=anchor_idx,
+        anchor_date=anchor_date,
+    )
 
 
 def has_minimum_observations(period_frame: pd.DataFrame, period: str) -> bool:
@@ -71,9 +98,17 @@ def has_minimum_observations(period_frame: pd.DataFrame, period: str) -> bool:
     return len(period_frame) >= PERIOD_MIN_OBS[period]
 
 
-def compute_total_return(period_frame: pd.DataFrame) -> float:
-    """Compute geometric total return from IDX when possible, otherwise chain RET."""
+def compute_total_return(period_frame: pd.DataFrame, anchor_idx: float | None = None) -> float:
+    """Compute geometric total return from IDX when possible, otherwise chain RET.
+
+    When ``anchor_idx`` (the IDX of the last observation *before* the window) is
+    supplied, the return is measured from that anchor to the last IDX in the
+    window. This includes the first in-window day's return, which the plain
+    first-in-window base drops ([AL2]).
+    """
     idx_values = period_frame["IDX"].dropna()
+    if anchor_idx is not None and pd.notna(anchor_idx) and anchor_idx != 0 and len(idx_values) >= 1:
+        return float(idx_values.iloc[-1] / anchor_idx - 1.0)
     if len(idx_values) >= 2 and idx_values.iloc[0] != 0:
         return float(idx_values.iloc[-1] / idx_values.iloc[0] - 1.0)
 
@@ -124,20 +159,29 @@ def compute_kpis(
     period_frame: pd.DataFrame,
     rf_rate_annual: float,
     trading_days_per_year: int,
+    anchor_idx: float | None = None,
+    anchor_date: pd.Timestamp | None = None,
 ) -> dict[str, float | int | pd.Timestamp]:
     """
     Compute BI KPIs for one series-period.
 
     Risk metrics use only non-null RET values. If fewer than 20 daily returns are
     available, risk KPIs are set to NaN while the row itself can still exist.
+
+    ``anchor_idx``/``anchor_date`` describe the last observation before the window
+    (see :func:`slice_period`); when present, the total return and CAGR span from
+    that anchor rather than from the first in-window row ([AL2]).
     """
     if period_frame.empty:
         raise ValueError("Cannot compute KPIs for an empty period frame")
 
     start_date = period_frame["Date"].min()
     end_date = period_frame["Date"].max()
-    total_return = compute_total_return(period_frame)
-    cagr = _compute_cagr(total_return, start_date, end_date)
+    return_start_date = (
+        anchor_date if anchor_date is not None and pd.notna(anchor_date) else start_date
+    )
+    total_return = compute_total_return(period_frame, anchor_idx=anchor_idx)
+    cagr = _compute_cagr(total_return, return_start_date, end_date)
 
     ret_valid = period_frame["RET"].dropna()
     dd_valid = period_frame["DD"].dropna()

@@ -260,7 +260,13 @@ def _build_fact_series_kpi(
                 {
                     "Series_ID": series_id,
                     "Period": period,
-                    **compute_kpis(period_slice.frame, rf_rate_annual, trading_days_per_year),
+                    **compute_kpis(
+                        period_slice.frame,
+                        rf_rate_annual,
+                        trading_days_per_year,
+                        anchor_idx=period_slice.anchor_idx,
+                        anchor_date=period_slice.anchor_date,
+                    ),
                 }
             )
 
