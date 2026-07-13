@@ -11,7 +11,8 @@ transaktioner_xlsx = "/Users/mikael/Fondanalys-Data/02_Indata/transaktioner.xlsx
 fonder_xlsx = "/Users/mikael/Fondanalys-Data/_exchange/fonder.xlsx"
 
 # Lokal BI-output (väg B): bi_prep skriver portfolio_bi_data.xlsx till datarotens
-# 03_Utdata/. OneDrive-kopian sköts nattligt av Fondanalys backup-jobb.
+# 03_Utdata/. Ingen OneDrive-kopia (Power BI-spåret nedlagt 260704, [AQ]) – filen
+# stannar lokalt och konsumeras av fond-rapporten (tools/fond_rapport/).
 bi_data_local_output = "/Users/mikael/Fondanalys-Data/03_Utdata/portfolio_bi_data.xlsx"
 
 # Fond-rapportens utdata (självbärande HTML) i den maskinlokala dataroten.

@@ -116,16 +116,14 @@ Indata (`transaktioner.xlsx`, `fonder.xlsx`) läses direkt från den lokala data
 
 Utöver knapptriggern kör launchd-jobbet `com.emsek.fondanalys.scheduled` en full pipeline
 nattligt (06:00) oberoende av VBA-knappen. Detta och övriga schemalagda jobb
-(`usa-exposure`, `logrotation`, nattlig OneDrive-backup av BI-filen) hanteras i
-Fondanalys-repots `apps/bridge_orchestrator/` respektive `apps/backup/` – inte i detta repo.
-Manuell körning på Mac-AI med `run_*.sh`-skripten fungerar parallellt och används primärt
-vid felsökning.
+(`usa-exposure`, `logrotation`) hanteras i Fondanalys-repots `apps/bridge_orchestrator/`
+respektive `apps/backup/` – inte i detta repo. Manuell körning på Mac-AI med
+`run_*.sh`-skripten fungerar parallellt och används primärt vid felsökning.
 
-**OBS – SharePoint/OneDrive-kopian:** Power BI Desktop på Windows läser en OneDrive-synkad
-kopia av BI-filen. Den kopian sköts av ett automatiskt nattligt backup-jobb
-(`com.emsek.fondanalys.backup`, 02:30) som speglar den lokala `03_Utdata/`-filen – det är
-**inte** ett manuellt steg. Verifiera dock att detta backup-jobb faktiskt pekar mot den
-uppdaterade lokala filen om SharePoint-innehållet någon gång verkar liggande efter.
+**Power BI nedlagt (2026-07-04, [AQ]):** BI-filen publiceras inte längre till OneDrive.
+Den stannar lokalt i `03_Utdata/` och konsumeras enbart av fond-rapporten
+(`tools/fond_rapport/` i detta repo). Nattbackupen (`apps/backup/`, 02:30) omfattar
+inte BI-filen – den täcker bara masterfilen + `04_Analyser/`.
 
 Datakontrakt: schema_version=1 enligt `_Claude_Output/260426_Design_Steg3_Kontrakt.md` i Fondanalys-OneDrive.
 
