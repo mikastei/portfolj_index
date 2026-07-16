@@ -31,6 +31,7 @@ from src.prices import CACHE_PATH
 from .attribution import run_attribution
 from .costs import compute_costs, verify_costs
 from .data import BIData, check_contract, load_bi_data
+from .diversification import compute_diversification
 from .metrics import window_kpi_table
 from .policy import compute_policy_regressions
 from .report import PORTFOLIOS, build_html
@@ -169,9 +170,17 @@ def main(argv: list[str] | None = None) -> int:
                         "med försiktighet (kraftig viktdrift i fönstret).",
                         file=sys.stderr,
                     )
+        diversification = compute_diversification(data, prices, risks)
+        for portfolio, rows in diversification.items():
+            for d in rows:
+                print(
+                    f"Diversifiering {portfolio} [{d.period}]: DR {d.dr:.2f}, "
+                    f"ENB {d.enb:.1f} av {d.n} fonder"
+                )
     else:
         attributions = None
         risks = None
+        diversification = None
         print(
             f"VARNING: prismatris saknas ({args.price_cache}) – attributions- och "
             "diversifieringsavsnitten byggs utan beräkning.",
@@ -236,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         risks,
         policy_regressions,
         sleeve_attributions,
+        diversification,
     )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
