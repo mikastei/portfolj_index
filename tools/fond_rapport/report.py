@@ -18,6 +18,7 @@ from . import charts
 from .attribution import TOP_N_FUNDS, PortfolioAttribution
 from .costs import CostsResult
 from .data import BIData, series_index
+from .diversification import DiversificationWindow
 from .metrics import KPI_COLUMNS as METRIC_KPIS
 from .policy import R2_THRESHOLD, PolicyRegression
 from .risk import MODEL_GAP_WARN, PortfolioRiskWindow
@@ -1128,6 +1129,7 @@ def build_html(
     risks: dict[str, list[PortfolioRiskWindow]] | None = None,
     policy_regressions: dict[str, PolicyRegression] | None = None,
     sleeve_attributions: dict[str, SleeveAttribution] | None = None,
+    diversification: dict[str, list[DiversificationWindow]] | None = None,
 ) -> str:
     """Sätt ihop hela rapporten till en självbärande HTML-sträng."""
     if costs is None:
@@ -1185,6 +1187,7 @@ datumintervallen står i kolumnrubrikerna. Alla horisonter räknas relativt as-o
 {_kpi_table(kpi, "Since_Start")}
 {_one_year_kpi_block(kpi, horizons)}
 {_risk_block(risks)}
+{_diversification_block(diversification)}
 {_policy_block(data, policy_regressions, inception, as_of)}
 
 <h2>3. Kategorier – var fanns avkastningen?</h2>
@@ -1381,3 +1384,91 @@ portföljer: under 15&nbsp;% svag, 15–25&nbsp;% god, över 25&nbsp;% stark spr
 (√252, ddof&nbsp;1) som portföljens Vol. Konsistenskontroll: √(w̄ᵀΣw̄) med snittvikterna
 återger den realiserade portföljvolen inom {fmt_pp(gap_max, 2).lstrip('+')} i värsta fallet.</p>
 {note_html}"""
+
+
+def _diversification_block(
+    diversification: dict[str, list[DiversificationWindow]] | None,
+) -> str:
+    """DR, ENB och MCTR per portfölj ([AZ]) – direkt under risk-blocket i sektion 2."""
+    heading = "<h3>Diversifieringsmått: DR, ENB och riskbidrag (MCTR)</h3>"
+    if not diversification:
+        return (
+            f'{heading}<div class="warn"><p>Prismatrisen saknades vid bygget – '
+            "DR/ENB/MCTR kunde inte beräknas.</p></div>"
+        )
+
+    dr_rows = []
+    for portfolio in PORTFOLIOS:
+        for d in diversification.get(portfolio, []):
+            dr_rows.append(
+                f'<tr class="real-row"><td>{SERIES_LABELS[f"PORT_{portfolio}_REAL"]}</td>'
+                f"<td>{PERIOD_LABELS.get(d.period, d.period)}</td>"
+                f"<td>{fmt_num(d.dr)}</td>"
+                f"<td>{fmt_num(d.enb, 1)} av {d.n}</td></tr>"
+            )
+    dr_table = (
+        "<table><thead><tr><th>Serie</th><th>Period</th><th>Diversification Ratio</th>"
+        "<th>ENB (effektivt antal oberoende vad)</th></tr></thead>"
+        f"<tbody>{''.join(dr_rows)}</tbody></table>"
+    )
+
+    mctr_blocks = []
+    for portfolio in PORTFOLIOS:
+        since_start = next(
+            (d for d in diversification.get(portfolio, []) if d.period == "Since_Start"), None
+        )
+        if since_start is not None:
+            mctr_blocks.append(_mctr_table(portfolio, since_start))
+
+    return f"""{heading}
+<p><strong>Diversification Ratio</strong> (DR&nbsp;=&nbsp;Summerad risk / Portföljrisk) är
+samma information som riskreduktionen ovan, uttryckt som kvot i stället för procentandel –
+DR&nbsp;=&nbsp;1/(1&nbsp;−&nbsp;Riskreduktion). Fördelen är att kvoten är direkt jämförbar
+över tid och mellan portföljer (DR&nbsp;=&nbsp;1,0 betyder ingen diversifiering; högre är
+mer). <strong>ENB</strong> (effektivt antal oberoende vad) operationaliserar tesen att
+antalet innehav inte är detsamma som antalet oberoende avkastningskällor: egenvärdena i
+korrelationsmatrisen för komponentavkastningarna normaliseras till en sannolikhetsfördelning
+och Shannon-entropin exponentieras. N helt okorrelerade innehav ger ENB&nbsp;=&nbsp;N; N
+perfekt korrelerade innehav ger ENB&nbsp;→&nbsp;1 – oavsett hur många fonder som faktiskt
+hålls.</p>
+{dr_table}
+<p><strong>MCTR</strong> (riskbidrag per innehav) fördelar portföljens totala volatilitet på
+innehavsnivå: bidragᵢ&nbsp;=&nbsp;wᵢ·(Σw)ᵢ&nbsp;/&nbsp;(wᵀΣw), där Σ är samma annualiserade
+kovariansmatris som riskdekomponeringens modellkontroll ovan. Bidragen summerar till 100&nbsp;%
+av portföljrisken. Kvoten riskbidrag/vikt visar om ett innehav bär mer risk än sin
+kapitalandel (&gt;&nbsp;1,0 = riskdrivare) eller mindre (&lt;&nbsp;1,0 = diversifierare) – ett
+litet innehav kan stå för en oproportionerligt stor del av risken. Tabellen visar sedan
+start; topp 10 innehav, resten aggregerad.</p>
+{''.join(mctr_blocks)}
+<p class="sub">Strukturmått, inte kvalitetsmått: lågt ENB eller hög MCTR-koncentration ska
+inte jagas som självändamål – komplement till Sharpe/Sortino/Calmar, inte ersättning. Samma
+instrumenturval, exkluderingar och fönster som diversifieringsblocket ovan, så samma
+modellgapsvarning gäller här (ingen egen tolerans). ENB påverkas av fönsterval och
+NAV-utjämning i portföljens fonder.</p>"""
+
+
+def _mctr_table(portfolio: str, d: DiversificationWindow, top_n: int = 10) -> str:
+    """MCTR-tabell för en portfölj: topp N innehav på riskbidrag, resten aggregerad."""
+    rows = d.contributions
+    shown, rest = rows[:top_n], rows[top_n:]
+    body = "".join(
+        f"<tr><td>{html.escape(r.display_name)}</td><td>{fmt_pct(r.weight)}</td>"
+        f"<td>{fmt_pct(r.risk_contribution)}</td><td>{fmt_num(r.ratio)}</td></tr>"
+        for r in shown
+    )
+    if rest:
+        rest_weight = sum(r.weight for r in rest)
+        rest_contrib = sum(r.risk_contribution for r in rest)
+        rest_ratio = rest_contrib / rest_weight if rest_weight else float("nan")
+        body += (
+            f"<tr><td>Övriga ({len(rest)} innehav)</td><td>{fmt_pct(rest_weight)}</td>"
+            f"<td>{fmt_pct(rest_contrib)}</td><td>{fmt_num(rest_ratio)}</td></tr>"
+        )
+    label = SERIES_LABELS[f"PORT_{portfolio}_REAL"]
+    return (
+        f"<h4>{html.escape(label)} – riskbidrag per innehav (MCTR, sedan start; "
+        f"{d.n} fonder)</h4>"
+        "<table><thead><tr><th>Innehav</th><th>Vikt</th><th>Riskbidrag</th>"
+        "<th>Kvot riskbidrag/vikt</th></tr></thead>"
+        f"<tbody>{body}</tbody></table>"
+    )

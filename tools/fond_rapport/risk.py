@@ -149,15 +149,20 @@ def day_weighted_avg_weights(
     return avg / avg.sum()
 
 
-def compute_portfolio_risk_window(
+def _prepare_risk_window(
     data: BIData,
     price_cache: pd.DataFrame,
     portfolio: str,
-    period: str,
     start: pd.Timestamp,
     end: pd.Timestamp,
-) -> PortfolioRiskWindow:
-    """Nyckeltalen för en portfölj över (start, end] ur BI-data + prismatris."""
+) -> tuple[pd.Series, pd.DataFrame, list[str], float]:
+    """(vikter, fondavkastningar, exkluderade, exkluderad_vikt) för fönstret (start, end].
+
+    Delad förberedelse mellan riskdekomponeringen här och diversifieringsmåtten
+    (DR/ENB/MCTR, :mod:`diversification`) – exakt samma instrumenturval,
+    exkluderingsregler och fönster ligger till grund för båda; ingen parallell
+    datamotor.
+    """
     alloc = data.fact_alloc_monthly[data.fact_alloc_monthly["Portfolio_Key"] == portfolio]
     if alloc.empty:
         raise ValueError(f"Fact_Portfolio_Alloc_Monthly saknar portfölj {portfolio}")
@@ -180,6 +185,21 @@ def compute_portfolio_risk_window(
     lookback = start - pd.Timedelta(days=PRICE_LOOKBACK_DAYS)
     fund_rets = _fund_daily_returns_sek(data, list(weights.index), lookback, price_cache)
     fund_rets = fund_rets[(fund_rets.index > start) & (fund_rets.index <= end)]
+    return weights, fund_rets, excluded, excluded_weight
+
+
+def compute_portfolio_risk_window(
+    data: BIData,
+    price_cache: pd.DataFrame,
+    portfolio: str,
+    period: str,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> PortfolioRiskWindow:
+    """Nyckeltalen för en portfölj över (start, end] ur BI-data + prismatris."""
+    weights, fund_rets, excluded, excluded_weight = _prepare_risk_window(
+        data, price_cache, portfolio, start, end
+    )
 
     real = WindowSlice(data, f"PORT_{portfolio}_REAL", start, end)
     if not real.valid:
