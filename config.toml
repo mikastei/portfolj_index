@@ -15,6 +15,12 @@ fonder_xlsx = "/Users/mikael/Fondanalys-Data/_exchange/fonder.xlsx"
 # stannar lokalt och konsumeras av fond-rapporten (tools/fond_rapport/).
 bi_data_local_output = "/Users/mikael/Fondanalys-Data/03_Utdata/portfolio_bi_data.xlsx"
 
+# Statisk TER-seedfil för utträdda/otäckta instrument ([AU], 2026-07-19).
+# Fyller endast Dim_Instrument-rader med TER_Status=no_data, skriver aldrig
+# över ett skrapat Nordnet-värde. Mängden är stängd (nya innehav täcks av
+# ordinarie Nordnet-skrapning), så filen behöver aldrig växa i normal drift.
+ter_seed_csv = "/Users/mikael/Fondanalys-Data/02_Indata/ter_seed.csv"
+
 # Fond-rapportens utdata (självbärande HTML) i den maskinlokala dataroten.
 # Filnamn: fond_rapport_<as-of>.html. Faller tillbaka till repo-reports/ om tomt.
 fond_rapport_output_dir = "/Users/mikael/Fondanalys-Data/04_Analyser/Portföljanalyser"

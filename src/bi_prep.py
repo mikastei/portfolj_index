@@ -330,6 +330,84 @@ def _attach_instrument_ter(
     return merged
 
 
+TER_SEED_REQUIRED_COLUMNS = ("ISIN", "TER")
+
+
+def _load_ter_seed(seed_path: Path) -> pd.DataFrame | None:
+    """Läs den statiska TER-seedfilen för utträdda/otäckta instrument ([AU]).
+
+    Saknad eller oläsbar fil är aldrig ett hårt fel: bi_prep fortsätter utan
+    seed och loggar en varning (broad except är avsiktligt här).
+    """
+    if not seed_path.exists():
+        logging.warning("TER-seedfil saknas (%s) – fortsätter utan seed", seed_path)
+        return None
+    try:
+        seed = pd.read_csv(seed_path, sep=";", encoding="utf-8", dtype=str)
+    except Exception as exc:
+        logging.warning("TER-seedfil kunde inte läsas (%s): %s – fortsätter utan seed", seed_path, exc)
+        return None
+
+    missing_columns = [c for c in TER_SEED_REQUIRED_COLUMNS if c not in seed.columns]
+    if missing_columns:
+        logging.warning(
+            "TER-seedfil saknar obligatoriska kolumner %s (%s) – fortsätter utan seed",
+            missing_columns,
+            seed_path,
+        )
+        return None
+
+    seed["ISIN"] = seed["ISIN"].astype(str).str.strip()
+    seed["TER"] = pd.to_numeric(seed["TER"], errors="coerce")
+    seed = seed[(seed["ISIN"] != "") & seed["TER"].notna()]
+    return seed.drop_duplicates(subset=["ISIN"], keep="first")
+
+
+def _apply_ter_seed(dim_instrument: pd.DataFrame, seed_path: Path) -> pd.DataFrame:
+    """Fyll TER för utträdda/otäckta instrument från den statiska seedfilen.
+
+    Matchning på ISIN. Seed fyller **endast** rader utan ett skrapat värde
+    (TER_Status='no_data' eller saknad status/TER) – ett skrapat värde skrivs
+    aldrig över, samma invariant som Mapping-fälten i transaction_data.
+    Instrument utan ISIN (benchmarks, policyserier) matchar aldrig och
+    berörs inte. Seedade rader får TER_Status='ok', TER_Source='seed'.
+    """
+    out = dim_instrument.copy()
+    if out.empty or "ISIN" not in out.columns:
+        return out
+
+    seed = _load_ter_seed(seed_path)
+    if seed is None or seed.empty:
+        return out
+
+    isin_clean = out["ISIN"].astype(str).str.strip()
+    known_isins = set(isin_clean[out["ISIN"].notna()])
+    unknown_isins = sorted(set(seed["ISIN"]) - known_isins)
+    for isin in unknown_isins:
+        logging.warning(
+            "TER-seed: ISIN %s i seedfilen finns inte i instrumentuniversumet – rad ignoreras",
+            isin,
+        )
+
+    ter_status = out["TER_Status"] if "TER_Status" in out.columns else pd.Series(pd.NA, index=out.index)
+    needs_seed = ter_status.isna() | (ter_status.astype(str).str.strip() == "no_data")
+
+    seed_ter = seed.set_index("ISIN")["TER"]
+    seed_rows = needs_seed & out["ISIN"].notna() & isin_clean.isin(seed_ter.index)
+    if not seed_rows.any():
+        return out
+
+    out.loc[seed_rows, "TER"] = isin_clean[seed_rows].map(seed_ter)
+    out.loc[seed_rows, "TER_Status"] = "ok"
+    out.loc[seed_rows, "TER_Source"] = "seed"
+    logging.info(
+        "TER-seed: fyllde %s instrument från %s",
+        int(seed_rows.sum()),
+        seed_path.name,
+    )
+    return out
+
+
 def _build_dim_instrument(
     series_definition: pd.DataFrame,
     portfolio_series_map: pd.DataFrame,
@@ -605,6 +683,7 @@ def run(
         source.portfolio_series_map,
         source.instrument_cost,
     )
+    dim_instrument = _apply_ter_seed(dim_instrument, config.PATH_TER_SEED)
     fact_portfolio_courtage = _build_fact_portfolio_courtage(source.portfolio_courtage)
     snapshot_date = fact_series_daily["Date"].max()
     fact_allocation_snapshot = _build_fact_portfolio_allocation_snapshot(

@@ -38,7 +38,14 @@ REL_TOLERANCE = 1e-6
 #   PA_REAL 126,60→125,99 över 2026-07-06→07-10 (−0,48 %), identisk med PA_TGT
 #   (−0,47 %) och PA_CUR, gradvis utan dagsspik; divergensen mot POLICY_PA är
 #   EM/tematik-släpet mot ACWI (samma mönster i EGEN_REAL). Toleransen oförändrad.
-REAL_ANCHORS = {"PORT_PA_REAL": 126.0, "PORT_EGEN_REAL": 121.4}
+# - EGEN 120,0 / PA 125,4: uppdaterade 2026-07-19 (bygget för 2026-07-17, [AU]-
+#   TER-seedfil-arbetet) från 121,4/126,0 (per 2026-07-13). Bekräftad drift –
+#   EGEN_REAL −0,82 %, EGEN_TGT −0,79 %, EGEN_CUR −0,79 %; PA_REAL −0,30 %,
+#   PA_TGT −0,28 %, PA_CUR −0,30 % över 2026-07-13→07-17, gradvis utan
+#   dagsspik och identisk mellan REAL/TGT/CUR inom varje portfölj – legitim
+#   marknadsrörelse, inte fel fil/glitch. TER-seedändringen rör bara
+#   Dim_Instrument och påverkar inte prisserierna. Toleransen oförändrad.
+REAL_ANCHORS = {"PORT_PA_REAL": 125.4, "PORT_EGEN_REAL": 120.0}
 ANCHOR_TOLERANCE = 0.5
 REBASE_TOLERANCE = 1e-9
 
