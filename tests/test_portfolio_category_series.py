@@ -376,3 +376,137 @@ def test_real_total_aligns_weekend_trade_to_next_price_day_not_bokforingsdag():
     assert total_series.loc[pd.Timestamp("2024-01-08"), "RET"] == pytest.approx(0.0)
     assert total_series.loc[pd.Timestamp("2024-01-09"), "RET"] == pytest.approx(0.0)
     assert total_series.loc[pd.Timestamp("2024-01-10"), "RET"] == pytest.approx(0.0)
+
+
+# --- Drivkraft ([BD]) -----------------------------------------------------------
+
+
+def _driver_frames():
+    portfolio_metadata = pd.DataFrame(
+        [
+            {
+                "Portfolio_Name": "EGEN",
+                "Index_Start_Date": pd.Timestamp("2024-01-01"),
+                "Initial_Index_Value": 100.0,
+            }
+        ]
+    )
+    benchmarks = pd.DataFrame(
+        [{"Benchmark_ID": "BM1", "Yahoo_Ticker": "AAA", "Include_From_Date": pd.Timestamp("2024-01-01")}]
+    )
+    mapping = pd.DataFrame(
+        [
+            {
+                "ISIN": "SE0001",
+                "Name": "Sverige Indexfond",
+                "Yahoo_Ticker": "AAA",
+                "Instrument_Type": "Fund",
+                "Price_Currency": "SEK",
+                "Category": "Breda fonder",
+            }
+        ]
+    )
+    transactions = pd.DataFrame(columns=[COL_AFFARSDAG, "ISIN", "Antal", "Transaktionstyp", "Belopp", "Valuta"])
+    return portfolio_metadata, benchmarks, mapping, transactions
+
+
+def test_series_definition_reads_driver_from_fondertabell():
+    portfolio_metadata, benchmarks, mapping, transactions = _driver_frames()
+    fondertabell = pd.DataFrame(
+        [{COL_PORTFOLJ: "EGEN", "Yahoo": "AAA", "Andel": 1.0, "AndelP": 1.0, "Drivkraft": "Bred marknadsbeta"}]
+    )
+
+    series_definition = build_series_definition(
+        portfolio_metadata,
+        benchmarks,
+        mapping,
+        transactions,
+        real_tickers=["AAA"],
+        model_tickers=["AAA"],
+        fondertabell=fondertabell,
+    )
+
+    ast_row = series_definition.loc[series_definition["Series_ID"] == "AST_AAA"].iloc[0]
+    assert ast_row["Driver"] == "Bred marknadsbeta"
+
+
+def test_series_definition_driver_empty_for_port_and_benchmark_rows():
+    """Drivkraft klassas per fond, inte för PORT-varianter/REAL_CAT/benchmarkindex -
+    ingen gissning även om tickern råkar finnas i Fondertabell."""
+    portfolio_metadata, benchmarks, mapping, transactions = _driver_frames()
+    fondertabell = pd.DataFrame(
+        [{COL_PORTFOLJ: "EGEN", "Yahoo": "AAA", "Andel": 1.0, "AndelP": 1.0, "Drivkraft": "Bred marknadsbeta"}]
+    )
+
+    series_definition = build_series_definition(
+        portfolio_metadata,
+        benchmarks,
+        mapping,
+        transactions,
+        real_tickers=["AAA"],
+        model_tickers=["AAA"],
+        fondertabell=fondertabell,
+    )
+
+    port_rows = series_definition[series_definition["Series_Type"] == "PORT"]
+    assert port_rows["Driver"].isna().all()
+    bm_row = series_definition.loc[series_definition["Series_ID"] == "BM_BM1"].iloc[0]
+    assert pd.isna(bm_row["Driver"])
+
+
+def test_series_definition_without_fondertabell_leaves_driver_empty():
+    """fondertabell=None (default) - bakåtkompatibelt, ingen krasch."""
+    portfolio_metadata, benchmarks, mapping, transactions = _driver_frames()
+
+    series_definition = build_series_definition(
+        portfolio_metadata,
+        benchmarks,
+        mapping,
+        transactions,
+        real_tickers=["AAA"],
+        model_tickers=["AAA"],
+    )
+
+    assert series_definition["Driver"].isna().all()
+
+
+def test_series_definition_missing_drivkraft_column_warns_and_leaves_empty(caplog):
+    portfolio_metadata, benchmarks, mapping, transactions = _driver_frames()
+    fondertabell = pd.DataFrame([{COL_PORTFOLJ: "EGEN", "Yahoo": "AAA", "Andel": 1.0, "AndelP": 1.0}])
+
+    with caplog.at_level("WARNING"):
+        series_definition = build_series_definition(
+            portfolio_metadata,
+            benchmarks,
+            mapping,
+            transactions,
+            real_tickers=["AAA"],
+            model_tickers=["AAA"],
+            fondertabell=fondertabell,
+        )
+
+    assert series_definition["Driver"].isna().all()
+    assert any("Drivkraft" in record.message for record in caplog.records)
+
+
+def test_series_definition_ambiguous_driver_per_ticker_is_not_guessed():
+    portfolio_metadata, benchmarks, mapping, transactions = _driver_frames()
+    fondertabell = pd.DataFrame(
+        [
+            {COL_PORTFOLJ: "EGEN", "Yahoo": "AAA", "Andel": 0.5, "AndelP": 0.5, "Drivkraft": "Bred marknadsbeta"},
+            {COL_PORTFOLJ: "PA", "Yahoo": "AAA", "Andel": 0.5, "AndelP": 0.5, "Drivkraft": "Stabilitet & skydd"},
+        ]
+    )
+
+    series_definition = build_series_definition(
+        portfolio_metadata,
+        benchmarks,
+        mapping,
+        transactions,
+        real_tickers=["AAA"],
+        model_tickers=["AAA"],
+        fondertabell=fondertabell,
+    )
+
+    ast_row = series_definition.loc[series_definition["Series_ID"] == "AST_AAA"].iloc[0]
+    assert pd.isna(ast_row["Driver"])

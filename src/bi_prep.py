@@ -421,6 +421,17 @@ def _build_dim_instrument(
     map_rows["Display_Name"] = _nullable_text(map_rows["Display_Name"])
     map_rows["Price_Currency"] = _nullable_text(map_rows["Price_Currency"])
 
+    # Driver ([BD]) saknas i uppström-workbooks byggda före denna funktion fanns -
+    # grace:a till tom kolumn i stället för att krascha, samma mönster som
+    # Geography redan hanteras (ovaliderad i bi_io.REQUIRED_SHEETS).
+    series_definition = series_definition.copy()
+    if "Driver" not in series_definition.columns:
+        logging.warning(
+            "Series_Definition saknar kolumnen 'Driver' - uppström-workbooken är "
+            "byggd före [BD]; Dim_Instrument.Driver blir tomt för samtliga instrument"
+        )
+        series_definition["Driver"] = pd.NA
+
     series_rows = series_definition[
         [
             "Yahoo_Ticker",
@@ -430,6 +441,7 @@ def _build_dim_instrument(
             "Instrument_Type",
             "Category",
             "Geography",
+            "Driver",
         ]
     ].copy()
     series_rows["Yahoo_Ticker"] = _nullable_text(series_rows["Yahoo_Ticker"])
@@ -439,6 +451,7 @@ def _build_dim_instrument(
     series_rows["Instrument_Type"] = _nullable_text(series_rows["Instrument_Type"])
     series_rows["Category"] = _nullable_text(series_rows["Category"])
     series_rows["Geography"] = _nullable_text(series_rows["Geography"])
+    series_rows["Driver"] = _nullable_text(series_rows["Driver"])
 
     all_tickers = (
         pd.concat([map_rows[["Yahoo_Ticker"]], series_rows[["Yahoo_Ticker"]]], ignore_index=True)
@@ -458,6 +471,7 @@ def _build_dim_instrument(
                 "Instrument_Type",
                 "Category",
                 "Geography",
+                "Driver",
                 "Structure",
                 "TER",
                 "TER_Status",
@@ -472,7 +486,9 @@ def _build_dim_instrument(
     )
     metadata_from_series = (
         series_rows.dropna(subset=["Yahoo_Ticker"])
-        .sort_values(["Yahoo_Ticker", "Display_Name", "ISIN", "Price_Currency", "Instrument_Type", "Category", "Geography"])
+        .sort_values(
+            ["Yahoo_Ticker", "Display_Name", "ISIN", "Price_Currency", "Instrument_Type", "Category", "Geography", "Driver"]
+        )
         .drop_duplicates(subset=["Yahoo_Ticker"], keep="first")
     )
     dim_instrument = all_tickers.merge(metadata_from_map, on="Yahoo_Ticker", how="left")
@@ -483,7 +499,7 @@ def _build_dim_instrument(
         suffixes=("_map", "_series"),
     )
     dim_instrument.insert(0, "Instrument_Key", dim_instrument["Yahoo_Ticker"])
-    for column in ("ISIN", "Display_Name", "Price_Currency", "Instrument_Type", "Category", "Geography"):
+    for column in ("ISIN", "Display_Name", "Price_Currency", "Instrument_Type", "Category", "Geography", "Driver"):
         dim_instrument[column] = _combine_optional_columns(dim_instrument, column)
     dim_instrument["Structure"] = pd.NA
     dim_instrument = _attach_instrument_ter(dim_instrument, instrument_cost)
@@ -497,6 +513,7 @@ def _build_dim_instrument(
             "Instrument_Type",
             "Category",
             "Geography",
+            "Driver",
             "Structure",
             "TER",
             "TER_Status",
@@ -653,6 +670,33 @@ def _add_excel_table(writer: pd.ExcelWriter, sheet_name: str, table_name: str) -
         cell.fill = TABLE_HEADER_FILL
 
 
+def _warn_on_unclassified_active_holdings(
+    dim_instrument: pd.DataFrame, fact_allocation_snapshot: pd.DataFrame
+) -> None:
+    """Kanariefågel ([BD]): innehav med vikt i aktuellt snapshot utan Drivkraft-klassning.
+
+    Efter [BC] ska alla aktiva fonder vara klassade i Fondertabell (fonder.xlsx) -
+    en aktiv, oklassad post signalerar att en ny/utbytt fond glömts i klassningen.
+    """
+    if dim_instrument.empty or fact_allocation_snapshot.empty or "Driver" not in dim_instrument.columns:
+        return
+    active = fact_allocation_snapshot[fact_allocation_snapshot["Weight"] > 0]
+    active_keys = set(active["Instrument_Key"].dropna().unique())
+    if not active_keys:
+        return
+    driver_by_key = dim_instrument.set_index("Instrument_Key")["Driver"]
+    unclassified = sorted(
+        key for key in active_keys if key not in driver_by_key.index or pd.isna(driver_by_key[key])
+    )
+    if unclassified:
+        logging.warning(
+            "Drivkraft ([BD]): %s aktivt innehav (vikt > 0 i snapshotet) saknar klassning i "
+            "Fondertabell: %s",
+            len(unclassified),
+            ", ".join(unclassified),
+        )
+
+
 def run(
     source_output_path: str | Path | None = None,
     bi_output_path: str | Path | None = None,
@@ -695,6 +739,7 @@ def run(
         source.portfolio_alloc_monthly,
         dim_series,
     )
+    _warn_on_unclassified_active_holdings(dim_instrument, fact_allocation_snapshot)
 
     logging.info(
         "BI analysis universe: %s series, %s daily rows, %s KPI rows, snapshot date %s",

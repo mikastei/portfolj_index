@@ -114,6 +114,7 @@ def run() -> int:
         tables["transactions"],
         tickers["real"],
         tickers["model"],
+        tables["fondertabell"],
     )
     policy_definition = build_policy_series_definition(
         tables["benchmarks"],

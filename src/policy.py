@@ -211,6 +211,7 @@ def build_policy_series_definition(
             "Instrument_Type": None,
             "Category": None,
             "Geography": None,
+            "Driver": None,
             "Include_From_Date": start_date,
             "Index_Start_Date": start_date,
             "Initial_Index_Value": initial_index_value,

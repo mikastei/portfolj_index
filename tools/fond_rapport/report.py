@@ -19,6 +19,12 @@ from .attribution import TOP_N_FUNDS, PortfolioAttribution
 from .costs import CostsResult
 from .data import BIData, series_index
 from .diversification import DiversificationWindow
+from .drivkraft import (
+    UNCLASSIFIED_LABEL,
+    DriverExposureWindow,
+    DriverRiskShareWindow,
+    renormalized_over_classified,
+)
 from .metrics import KPI_COLUMNS as METRIC_KPIS
 from .policy import R2_THRESHOLD, PolicyRegression
 from .risk import MODEL_GAP_WARN, PortfolioRiskWindow
@@ -1130,6 +1136,8 @@ def build_html(
     policy_regressions: dict[str, PolicyRegression] | None = None,
     sleeve_attributions: dict[str, SleeveAttribution] | None = None,
     diversification: dict[str, list[DiversificationWindow]] | None = None,
+    driver_exposure: dict[str, DriverExposureWindow] | None = None,
+    driver_risk_share: dict[str, DriverRiskShareWindow] | None = None,
 ) -> str:
     """Sätt ihop hela rapporten till en självbärande HTML-sträng."""
     if costs is None:
@@ -1188,6 +1196,7 @@ datumintervallen står i kolumnrubrikerna. Alla horisonter räknas relativt as-o
 {_one_year_kpi_block(kpi, horizons)}
 {_risk_block(risks)}
 {_diversification_block(diversification)}
+{_drivkraft_block(driver_exposure, driver_risk_share)}
 {_policy_block(data, policy_regressions, inception, as_of)}
 
 <h2>3. Kategorier – var fanns avkastningen?</h2>
@@ -1471,4 +1480,99 @@ def _mctr_table(portfolio: str, d: DiversificationWindow, top_n: int = 10) -> st
         "<table><thead><tr><th>Innehav</th><th>Vikt</th><th>Riskbidrag</th>"
         "<th>Kvot riskbidrag/vikt</th></tr></thead>"
         f"<tbody>{body}</tbody></table>"
+    )
+
+
+def _drivkraft_block(
+    exposure: dict[str, DriverExposureWindow] | None,
+    risk_share: dict[str, DriverRiskShareWindow] | None,
+) -> str:
+    """Motorexponering per portfölj ([BD]) – direkt under diversifieringsblocket i sektion 2."""
+    heading = "<h3>Motorexponering: avkastningsdrivkrafter per portfölj</h3>"
+    if not exposure:
+        return (
+            f'{heading}<div class="warn"><p>Drivkraft-klassningen saknades vid bygget – '
+            "motorexponeringen kunde inte beräknas.</p></div>"
+        )
+
+    exposure_blocks = "".join(
+        _driver_exposure_table(portfolio, exposure[portfolio])
+        for portfolio in PORTFOLIOS
+        if portfolio in exposure
+    )
+
+    if risk_share:
+        risk_html = "".join(
+            _driver_risk_share_table(portfolio, risk_share[portfolio])
+            for portfolio in PORTFOLIOS
+            if portfolio in risk_share
+        )
+    else:
+        risk_html = (
+            '<div class="warn"><p>Prismatrisen saknades vid bygget – riskandel per motor '
+            "kunde inte beräknas.</p></div>"
+        )
+
+    return f"""{heading}
+<p>Exponering per avkastningsmotor (Drivkraft) – Mickes klassning per fond, en
+primärmotor per fond; sekundära drivkrafter redovisas inte här.
+<strong>Nuläge</strong> är dagens REAL-snapshotvikter; <strong>Sedan start</strong>
+är samma dagviktade snitt av månadsvikterna som TER-/riskblocken ovan. Motorvikterna
+är omräknade så att de summerar till 100&nbsp;% över de klassade innehaven – en
+eventuell oklassad rest (t.ex. nytillkomna fonder som ännu inte hunnit klassas)
+redovisas separat, ingen gissning.</p>
+{exposure_blocks}
+<p><strong>Riskandel per motor</strong> är en ren aggregering av MCTR-bidragen ovan
+(sedan start) – ingen ny riskberäkning. Kvoten riskandel/vikt: &gt;&nbsp;1,0 =
+riskdrivare, &lt;&nbsp;1,0 = diversifierare, samma tolkningsspråk som MCTR-tabellen.</p>
+{risk_html}
+<p class="sub">Strukturmått, inte kvalitetsmått: motorklassningen är ett beslut om
+fondens huvudsakliga avkastningskälla, inte en prognos – jämför över tid, inte mot en
+absolutskala. Delar diversifieringsblockets modellgapsvarning för riskandelen (ingen
+egen tolerans).</p>"""
+
+
+def _driver_exposure_table(portfolio: str, window: DriverExposureWindow) -> str:
+    """Motorvikter (Nuläge/Sedan start) för en portfölj, omräknade över klassade innehav."""
+    label = SERIES_LABELS[f"PORT_{portfolio}_REAL"]
+    snap = renormalized_over_classified(window.snapshot_weights)
+    since = renormalized_over_classified(window.since_start_weights)
+    drivers = sorted(
+        set(snap.index) | set(since.index),
+        key=lambda name: -max(snap.get(name, 0.0), since.get(name, 0.0)),
+    )
+    rows = "".join(
+        f"<tr><td>{html.escape(driver)}</td>"
+        f"<td>{fmt_pct(snap.get(driver, 0.0))}</td>"
+        f"<td>{fmt_pct(since.get(driver, 0.0))}</td></tr>"
+        for driver in drivers
+    )
+    snap_unclassified = float(window.snapshot_weights.get(UNCLASSIFIED_LABEL, 0.0))
+    since_unclassified = float(window.since_start_weights.get(UNCLASSIFIED_LABEL, 0.0))
+    footnote = (
+        f'<p class="sub">Oklassad andel (utanför 100&nbsp;%-summan ovan): Nuläge '
+        f"{fmt_pct(snap_unclassified)}, Sedan start {fmt_pct(since_unclassified)}.</p>"
+        if snap_unclassified > 0 or since_unclassified > 0
+        else ""
+    )
+    return (
+        f"<h4>{html.escape(label)} – motorexponering</h4>"
+        "<table><thead><tr><th>Motor</th><th>Nuläge</th><th>Sedan start</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>{footnote}"
+    )
+
+
+def _driver_risk_share_table(portfolio: str, share: DriverRiskShareWindow) -> str:
+    """Riskandel per motor (sedan start) för en portfölj, med kvoten riskandel/vikt."""
+    label = SERIES_LABELS[f"PORT_{portfolio}_REAL"]
+    rows = "".join(
+        f"<tr><td>{html.escape(driver)}</td><td>{fmt_pct(share.weight[driver])}</td>"
+        f"<td>{fmt_pct(share.risk_share[driver])}</td><td>{fmt_num(share.ratio[driver])}</td></tr>"
+        for driver in share.risk_share.index
+    )
+    return (
+        f"<h4>{html.escape(label)} – riskandel per motor (sedan start)</h4>"
+        "<table><thead><tr><th>Motor</th><th>Vikt</th><th>Riskandel</th>"
+        "<th>Kvot riskandel/vikt</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
     )
