@@ -32,6 +32,7 @@ from .attribution import run_attribution
 from .costs import compute_costs, verify_costs
 from .data import BIData, check_contract, load_bi_data
 from .diversification import compute_diversification
+from .drivkraft import UNCLASSIFIED_LABEL, compute_driver_exposure, compute_driver_risk_share
 from .metrics import window_kpi_table
 from .policy import compute_policy_regressions
 from .report import PORTFOLIOS, build_html
@@ -136,6 +137,23 @@ def main(argv: list[str] | None = None) -> int:
         deviating = verification.kpi_comparison[~verification.kpi_comparison["OK"]]
         print(deviating.to_string(index=False), file=sys.stderr)
 
+    driver_exposure = compute_driver_exposure(data, PORTFOLIOS, inception, as_of)
+    if driver_exposure is None:
+        print(
+            "VARNING: Drivkraft-klassning saknas i Dim_Instrument – "
+            "motorexponeringsavsnittet ([BD]) byggs utan beräkning.",
+            file=sys.stderr,
+        )
+    else:
+        for portfolio, window in driver_exposure.items():
+            top = window.snapshot_weights.drop(index=UNCLASSIFIED_LABEL, errors="ignore")
+            if not top.empty:
+                driver, weight = top.index[0], top.iloc[0]
+                print(
+                    f"Motorexponering {portfolio} (Nuläge): störst är {driver} "
+                    f"({weight * 100:.1f} % av portföljen)"
+                )
+
     if args.price_cache.exists():
         windowed = _windowed_bidata(data, inception, as_of)
         attributions = run_attribution(windowed, args.price_cache)
@@ -177,10 +195,21 @@ def main(argv: list[str] | None = None) -> int:
                     f"Diversifiering {portfolio} [{d.period}]: DR {d.dr:.2f}, "
                     f"ENB {d.enb:.1f} av {d.n} fonder"
                 )
+        driver_risk_share = compute_driver_risk_share(data, diversification)
+        if driver_risk_share is not None:
+            for portfolio, share in driver_risk_share.items():
+                top = share.risk_share.drop(index=UNCLASSIFIED_LABEL, errors="ignore")
+                if not top.empty:
+                    driver, risk = top.index[0], top.iloc[0]
+                    print(
+                        f"Riskandel {portfolio} (sedan start): störst är {driver} "
+                        f"({risk * 100:.1f} % av portföljrisken, kvot {share.ratio[driver]:.2f})"
+                    )
     else:
         attributions = None
         risks = None
         diversification = None
+        driver_risk_share = None
         print(
             f"VARNING: prismatris saknas ({args.price_cache}) – attributions- och "
             "diversifieringsavsnitten byggs utan beräkning.",
@@ -246,6 +275,8 @@ def main(argv: list[str] | None = None) -> int:
         policy_regressions,
         sleeve_attributions,
         diversification,
+        driver_exposure,
+        driver_risk_share,
     )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)

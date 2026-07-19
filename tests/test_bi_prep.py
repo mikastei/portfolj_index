@@ -4,10 +4,12 @@ import pytest
 from src.bi_prep import (
     _apply_ter_seed,
     _build_analysis_metadata,
+    _build_dim_instrument,
     _build_dim_portfolio,
     _clean_text,
     _combine_optional_columns,
     _nullable_text,
+    _warn_on_unclassified_active_holdings,
 )
 
 
@@ -193,3 +195,91 @@ def test_apply_ter_seed_unknown_isin_warns_and_continues(tmp_path, caplog):
     assert out.loc[out["ISIN"] == "SE0000000001"].iloc[0]["TER"] == pytest.approx(0.54)
     assert "SE0009999999" in caplog.text
     assert "finns inte i instrumentuniversumet" in caplog.text
+
+
+# --- Drivkraft / Driver ([BD]) ---------------------------------------------------
+
+
+def _map_row(ticker):
+    return {
+        "Yahoo_Ticker": ticker,
+        "ISIN": f"ISIN_{ticker}",
+        "Display_Name": f"Fond {ticker}",
+        "Price_Currency": "SEK",
+    }
+
+
+def test_build_dim_instrument_includes_driver_column():
+    portfolio_series_map = pd.DataFrame([_map_row("AAA"), _map_row("BBB")])
+    series_definition = pd.DataFrame(
+        [
+            _series_definition_row("AST_AAA", "AST") | {"Yahoo_Ticker": "AAA", "Driver": "Bred marknadsbeta"},
+            _series_definition_row("AST_BBB", "AST") | {"Yahoo_Ticker": "BBB", "Driver": pd.NA},
+        ]
+    )
+
+    dim_instrument = _build_dim_instrument(series_definition, portfolio_series_map)
+
+    assert "Driver" in dim_instrument.columns
+    row_a = dim_instrument.loc[dim_instrument["Instrument_Key"] == "AAA"].iloc[0]
+    row_b = dim_instrument.loc[dim_instrument["Instrument_Key"] == "BBB"].iloc[0]
+    assert row_a["Driver"] == "Bred marknadsbeta"
+    assert pd.isna(row_b["Driver"])
+
+
+def test_build_dim_instrument_missing_driver_column_warns_and_defaults_empty(caplog):
+    """Uppström-workbook byggd före [BD] saknar Driver-kolumnen helt - graceful,
+    ingen krasch, samma mönster som andra optionella kolumner i denna funktion."""
+    portfolio_series_map = pd.DataFrame([_map_row("AAA")])
+    series_definition = pd.DataFrame([_series_definition_row("AST_AAA", "AST") | {"Yahoo_Ticker": "AAA"}])
+    assert "Driver" not in series_definition.columns
+
+    with caplog.at_level("WARNING"):
+        dim_instrument = _build_dim_instrument(series_definition, portfolio_series_map)
+
+    assert "Driver" in dim_instrument.columns
+    assert dim_instrument["Driver"].isna().all()
+    assert any("Driver" in record.message for record in caplog.records)
+
+
+def test_warn_on_unclassified_active_holdings_logs_warning(caplog):
+    dim_instrument = pd.DataFrame(
+        [
+            {"Instrument_Key": "AAA", "Driver": "Bred marknadsbeta"},
+            {"Instrument_Key": "BBB", "Driver": pd.NA},
+        ]
+    )
+    snapshot = pd.DataFrame(
+        [
+            {"Instrument_Key": "AAA", "Weight": 0.6},
+            {"Instrument_Key": "BBB", "Weight": 0.4},
+        ]
+    )
+
+    with caplog.at_level("WARNING"):
+        _warn_on_unclassified_active_holdings(dim_instrument, snapshot)
+
+    assert "BBB" in caplog.text
+    assert "AAA" not in caplog.text
+
+
+def test_warn_on_unclassified_active_holdings_silent_when_all_classified(caplog):
+    dim_instrument = pd.DataFrame([{"Instrument_Key": "AAA", "Driver": "Bred marknadsbeta"}])
+    snapshot = pd.DataFrame([{"Instrument_Key": "AAA", "Weight": 1.0}])
+
+    with caplog.at_level("WARNING"):
+        _warn_on_unclassified_active_holdings(dim_instrument, snapshot)
+
+    assert caplog.text == ""
+
+
+def test_warn_on_unclassified_active_holdings_ignores_zero_weight_rows(caplog):
+    """Endast innehav med vikt > 0 i snapshotet räknas som aktiva - en oklassad
+    fond med 0 % vikt (t.ex. utträdd) ska inte trigga kanariefågeln."""
+    dim_instrument = pd.DataFrame([{"Instrument_Key": "AAA", "Driver": pd.NA}])
+    snapshot = pd.DataFrame([{"Instrument_Key": "AAA", "Weight": 0.0}])
+
+    with caplog.at_level("WARNING"):
+        _warn_on_unclassified_active_holdings(dim_instrument, snapshot)
+
+    assert caplog.text == ""

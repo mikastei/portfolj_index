@@ -231,6 +231,31 @@ def _instrument_metadata_by_ticker(mapping: pd.DataFrame) -> pd.DataFrame:
     return grouped
 
 
+def _driver_by_ticker(fondertabell: pd.DataFrame) -> pd.Series:
+    """Yahoo-ticker -> Drivkraft, källa Fondertabell (fonder.xlsx, Sheet1).
+
+    Drivkraft-kolumnen är optional per [BC]-kontraktet (klassningen infördes efter
+    att fonder.xlsx-strukturen redan var i drift) – saknas den i indatafilen
+    loggas en WARNING och en tom lookup returneras (inget instrument gissas).
+    Ticker med flera olika Drivkraft-värden i tabellen ger också ingen gissning.
+    """
+    if "Drivkraft" not in fondertabell.columns or "Yahoo" not in fondertabell.columns:
+        if "Drivkraft" not in fondertabell.columns:
+            logger.warning(
+                "Fondertabell (fonder.xlsx) saknar kolumnen 'Drivkraft' - "
+                "Driver lämnas tomt för samtliga instrument"
+            )
+        return pd.Series(dtype=object)
+
+    df = fondertabell[["Yahoo", "Drivkraft"]].copy()
+    df["Yahoo"] = df["Yahoo"].fillna("").astype(str).str.strip()
+    df["Drivkraft"] = df["Drivkraft"].fillna("").astype(str).str.strip()
+    df = df[(df["Yahoo"] != "") & (df["Drivkraft"] != "")]
+    if df.empty:
+        return pd.Series(dtype=object)
+    return df.groupby("Yahoo")["Drivkraft"].agg(_first_unique_nonempty)
+
+
 def _portfolio_rows(portfolio_metadata: pd.DataFrame) -> list[pd.Series]:
     if portfolio_metadata.empty:
         raise ValueError("Portfolio_Metadata is empty")
@@ -932,9 +957,11 @@ def build_series_definition(
     transactions: pd.DataFrame,
     real_tickers: list[str],
     model_tickers: list[str],
+    fondertabell: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     instrument_meta = _instrument_metadata_by_ticker(mapping).set_index("Yahoo_Ticker", drop=False)
+    driver_meta = _driver_by_ticker(fondertabell) if fondertabell is not None else pd.Series(dtype=object)
     tx_all = transactions.copy()
     if "Portfolio_ID" not in tx_all.columns and "Dep\u00e5" in tx_all.columns:
         tx_all["Portfolio_ID"] = tx_all["Dep\u00e5"]
@@ -966,6 +993,7 @@ def build_series_definition(
                     "Instrument_Type": None,
                     "Category": None,
                     "Geography": None,
+                    "Driver": None,
                     "Include_From_Date": idx_start,
                     "Index_Start_Date": idx_start,
                     "Initial_Index_Value": idx0,
@@ -993,6 +1021,7 @@ def build_series_definition(
                     "Instrument_Type": None,
                     "Category": category,
                     "Geography": None,
+                    "Driver": None,
                     "Include_From_Date": idx_start,
                     "Index_Start_Date": idx_start,
                     "Initial_Index_Value": idx0,
@@ -1036,6 +1065,9 @@ def build_series_definition(
                 "Instrument_Type": info["Instrument_Type"] if info is not None else None,
                 "Category": bm_category,
                 "Geography": bm_geography,
+                # Drivkraft klassas per fond i Fondertabell, inte per benchmarkindex -
+                # ingen gissning här, jfr [BD]-kontraktet.
+                "Driver": None,
                 "Include_From_Date": pd.to_datetime(row["Include_From_Date"], errors="coerce"),
                 "Index_Start_Date": idx_start,
                 "Initial_Index_Value": idx0,
@@ -1058,6 +1090,7 @@ def build_series_definition(
                 "Instrument_Type": info["Instrument_Type"] if info is not None else None,
                 "Category": info["Category"] if info is not None else None,
                 "Geography": info["Geography"] if info is not None else None,
+                "Driver": driver_meta.get(ticker),
                 "Include_From_Date": idx_start,
                 "Index_Start_Date": idx_start,
                 "Initial_Index_Value": np.nan,
