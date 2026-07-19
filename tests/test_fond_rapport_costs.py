@@ -172,6 +172,35 @@ def test_snapshot_ter_and_coverage():
     assert result.snapshot_coverage["REAL"] == pytest.approx(1.0)
 
 
+def test_seed_share_tw_reflects_seed_sourced_weight():
+    # B (TER_Source='seed') bär 25 av 75 pp täckt vikt i periodslut 1, 0 av
+    # 100 pp i periodslut 2 – seed_share_tw ska bli dagviktat därav ([AU]).
+    dim_instrument = _dim_instrument()
+    dim_instrument["TER_Source"] = ["nordnet", "seed", pd.NA, "nordnet"]
+    data = BIData(
+        dim_date=EMPTY, dim_portfolio=EMPTY, dim_series=EMPTY,
+        dim_instrument=dim_instrument, fact_daily=EMPTY, fact_kpi=EMPTY,
+        fact_alloc=_snapshot(), fact_alloc_monthly=_alloc_monthly(), fact_courtage=_courtage(),
+    )
+    result = compute_portfolio_ter(data, "EGEN", INCEPTION, AS_OF)
+    expected = ((0.25 / 0.75) * 30 + 0.0 * 29) / 59
+    assert result.seed_share_tw == pytest.approx(expected)
+
+
+def test_compute_costs_flags_seed_share_when_present():
+    dim_instrument = _dim_instrument()
+    dim_instrument["TER_Source"] = ["nordnet", "seed", pd.NA, "nordnet"]
+    data = BIData(
+        dim_date=EMPTY, dim_portfolio=EMPTY, dim_series=EMPTY,
+        dim_instrument=dim_instrument, fact_daily=EMPTY, fact_kpi=EMPTY,
+        fact_alloc=pd.concat([_snapshot("EGEN"), _snapshot("PA")], ignore_index=True),
+        fact_alloc_monthly=pd.concat([_alloc_monthly("EGEN"), _alloc_monthly("PA")], ignore_index=True),
+        fact_courtage=_courtage(),
+    )
+    costs = compute_costs(data, INCEPTION, AS_OF)
+    assert any("TER-seedfilen" in flag for flag in costs.flags)
+
+
 # --- courtage --------------------------------------------------------------------
 
 

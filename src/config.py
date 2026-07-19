@@ -30,6 +30,12 @@ FOND_RAPPORT_OUTPUT_DIR = Path(
     _CONFIG["paths"].get("fond_rapport_output_dir", str(BASE_DIR / "reports"))
 )
 
+# Statisk TER-seedfil för utträdda/otäckta instrument ([AU]). Saknas nyckeln
+# eller filen fortsätter bi_prep utan seed (WARNING, ingen hård krasch).
+PATH_TER_SEED = Path(
+    _CONFIG["paths"].get("ter_seed_csv", str(BASE_DIR / "data" / "ter_seed.csv"))
+)
+
 # Policyreferenser: bucket -> Benchmark_ID samt strategivikter per portfölj.
 POLICY_BUCKETS: dict[str, str] = _CONFIG.get("policy", {}).get("buckets", {})
 POLICY_WEIGHTS: dict[str, dict[str, float]] = _CONFIG.get("policy", {}).get("weights", {})

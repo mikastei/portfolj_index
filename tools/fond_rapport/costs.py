@@ -45,6 +45,7 @@ class PortfolioTER:
     snapshot_ter: dict[str, float]  # variant -> viktad TER för dagens lista (fraktion/år)
     snapshot_coverage: dict[str, float]  # variant -> täckt vikt i snapshotet
     missing: pd.DataFrame  # innehav i fönstret som saknar TER
+    seed_share_tw: float  # andel av dagviktad täckt vikt vars TER kommer från TER-seedfilen ([AU])
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,18 @@ def _ter_fractions(data: BIData) -> pd.Series:
     return data.dim_instrument.set_index("Instrument_Key")["TER"].astype(float) / 100.0
 
 
+def _ter_sources(data: BIData) -> pd.Series:
+    """TER_Source per Instrument_Key ('nordnet'/'seed'/NA), för proveniensredovisning.
+
+    Bakåtkompatibelt: äldre/syntetiska Dim_Instrument utan TER_Source-kolumn
+    ger en tom serie (ingen instrumenttäckning räknas som seed).
+    """
+    dim = data.dim_instrument
+    if "TER_Source" not in dim.columns:
+        return pd.Series(pd.NA, index=dim.set_index("Instrument_Key").index)
+    return dim.set_index("Instrument_Key")["TER_Source"]
+
+
 # --- TER per portfölj ----------------------------------------------------------
 
 
@@ -118,6 +131,7 @@ def compute_portfolio_ter(
 ) -> PortfolioTER:
     """Tidsviktad TER ur Dim_Instrument × Fact_Portfolio_Alloc_Monthly."""
     ter = _ter_fractions(data)
+    ter_source = _ter_sources(data)
     alloc = data.fact_alloc_monthly
     alloc = alloc[
         (alloc["Portfolio_Key"] == portfolio)
@@ -134,7 +148,11 @@ def compute_portfolio_ter(
     for pe in period_ends:
         group = alloc[alloc["Period_End_Date"] == pe]
         weights = group.groupby("Instrument_Key")["Weight"].sum()
-        coverage, renorm, lower = _weighted_ter(weights, ter.reindex(weights.index))
+        period_ter = ter.reindex(weights.index)
+        coverage, renorm, lower = _weighted_ter(weights, period_ter)
+        covered = period_ter.notna()
+        cov_w = float(weights[covered].sum())
+        seed_w = float(weights[covered & (ter_source.reindex(weights.index) == "seed")].sum())
         rows.append(
             {
                 "Period_End_Date": pe,
@@ -142,6 +160,7 @@ def compute_portfolio_ter(
                 "Coverage": coverage,
                 "TER_Renorm": renorm,
                 "TER_Lower": lower,
+                "Seed_Share": seed_w / cov_w if cov_w > 0 else float("nan"),
             }
         )
     monthly = pd.DataFrame(rows).set_index("Period_End_Date")
@@ -155,6 +174,11 @@ def compute_portfolio_ter(
     )
     ter_tw_lower = float((monthly["TER_Lower"] * monthly["Days"]).sum() / monthly["Days"].sum())
     coverage_tw = float((monthly["Coverage"] * monthly["Days"]).sum() / monthly["Days"].sum())
+    seed_share_tw = (
+        float((monthly.loc[covered_mask, "Seed_Share"] * renorm_days).sum() / renorm_days.sum())
+        if renorm_days.sum() > 0
+        else float("nan")
+    )
 
     snapshot_ter: dict[str, float] = {}
     snapshot_coverage: dict[str, float] = {}
@@ -189,6 +213,7 @@ def compute_portfolio_ter(
         snapshot_ter=snapshot_ter,
         snapshot_coverage=snapshot_coverage,
         missing=missing,
+        seed_share_tw=seed_share_tw,
     )
 
 
@@ -275,6 +300,13 @@ def compute_costs(data: BIData, inception: pd.Timestamp, as_of: pd.Timestamp) ->
         "TER-nivåerna är dagens uppgifter (Dim_Instrument); historiska "
         "TER-förändringar fångas inte."
     )
+    for pter in ter.values():
+        if pter.seed_share_tw and pter.seed_share_tw > 0:
+            flags.append(
+                f"{pter.portfolio}: {pter.seed_share_tw * 100:.0f} % av den dagviktade "
+                "TER-täckningen kommer från TER-seedfilen (utträdda/otäckta innehav) – "
+                "dagens nivå, inte den historiska."
+            )
     flags.append(
         "Spread och FX-växlingsavgift vid ETF-handel fångas inte av datan och "
         "kvantifieras därför inte."
